@@ -12,6 +12,8 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "bluebird": "^3.7.2",
+    "reshuffle-eidr-connector": "^0.0.7",
     "reshuffle-runtime-enterprise": "^0.0.23"
   }
 }
