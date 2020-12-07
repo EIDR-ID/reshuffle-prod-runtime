@@ -1509,6 +1509,11 @@ async ({ info }) => {
   }
 }
 
+// Script: __Health
+const script_bfd0b9b74ce444de86575c84d2a6b55b = async (event, app) => {
+  event.res.send();
+}
+
 // Script: sorter
 const script_732731b8b1fa4a069e751d8f9576a939 = // sort is the standard sort type form a query parameter
 // order is 'asc' or 'desc'
@@ -1687,6 +1692,7 @@ app.registerHandler(script_8c9cf40cbc204476963d23d969224a34, '8c9cf40c-bc20-4476
 app.registerHandler(script_aec7f2c1ef0b4aabb3b01dcd2cd494b1, 'aec7f2c1-ef0b-4aab-b3b0-1dcd2cd494b1', 'zzQuery')
 app.registerHandler(script_0f3d9ccd2de440d98c827c2b3f5ddd8b, '0f3d9ccd-2de4-40d9-8c82-7c2b3f5ddd8b', 'shallow')
 app.registerHandler(script_7593e0bc639f4ef783900dd0495ad7ef, '7593e0bc-639f-4ef7-8390-0dd0495ad7ef', 'normalize')
+app.registerHandler(script_bfd0b9b74ce444de86575c84d2a6b55b, 'bfd0b9b7-4ce4-44de-8657-5c84d2a6b55b', '__Health')
 app.registerHandler(script_732731b8b1fa4a069e751d8f9576a939, '732731b8-b1fa-4a06-9e75-1d8f9576a939', 'sorter')
 app.registerHandler(script_86b3e96c564d4b9da741ddb83ea10d2c, '86b3e96c-564d-4b9d-a741-ddb83ea10d2c', '__Version')
 app.start()
