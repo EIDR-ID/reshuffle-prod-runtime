@@ -4,7 +4,7 @@
   "description": "",
   "scripts": {
     "clean": "rm -rf backups logs node_modules package-lock.json runtime",
-    "start": "RESHUFFLE_INSTRUCTIONS_SOURCE=none node index.js",
+    "start": "RESHUFFLE_INSTRUCTIONS_SOURCE=none node runtime/index.js",
     "make": "git fetch && git rebase origin/master && img=${RESHUFFLE_RUNTIME_IMAGE}:`git rev-parse --short HEAD` && docker build -t $img . && echo $img",
     "test": "img=${RESHUFFLE_RUNTIME_IMAGE}:`git rev-parse --short HEAD` && docker run -p 8000:8000 $img",
     "push": "img=${RESHUFFLE_RUNTIME_IMAGE}:`git rev-parse --short HEAD` && docker push $img"
