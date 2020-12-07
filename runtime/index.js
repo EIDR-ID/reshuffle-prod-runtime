@@ -1662,6 +1662,15 @@ app.getLogger().error('Runtime Http event creation error. Review configuration f
 }
 try {
 HttpConnector__API_bdde19de936d49c6a266aae83766cdf6 && HttpConnector__API_bdde19de936d49c6a266aae83766cdf6.on(
+{'method':'GET', 'path':'--health'}
+, script_bfd0b9b74ce444de86575c84d2a6b55b, '9bb3aa24-5caf-4748-a9bd-63f53dbd85cc')
+
+}
+catch (err) {
+app.getLogger().error('Runtime Http event creation error. Review configuration for event --health', err)
+}
+try {
+HttpConnector__API_bdde19de936d49c6a266aae83766cdf6 && HttpConnector__API_bdde19de936d49c6a266aae83766cdf6.on(
 {'method':'GET', 'path':'--version'}
 , script_86b3e96c564d4b9da741ddb83ea10d2c, '5607cfce-6f74-4ab4-b01c-b5d0eb2245d8')
 
