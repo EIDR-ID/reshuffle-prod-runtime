@@ -1,0 +1,6 @@
+**/.DS_Store
+backups/
+logs/
+node_modules/
+runtime/
+package-lock.json
