@@ -635,6 +635,130 @@ const script_108dfe6c53a947e3a6e050aa57660c2c = async (event) => {
   return rows.join('\n');
 }
 
+// Script: normalize
+const script_7593e0bc639f4ef783900dd0495ad7ef = //
+// Recursively clean up nodes in the information object
+// returned from the EIDR API. The object properties are
+// traversed and nested objects are treated resusively.
+//
+// @param inode      EIDR information object or a nested
+//                   object
+//
+// @param parentName (optional) name of parent node (used
+//                   for handling arrays)
+//
+// @return cleaned up information object
+//
+async ({ info }) => {
+
+  const forceArray = [
+    'Actor',
+    'AlternateName',
+    'AlternateNumber',
+    'AlternateID',
+    'AlternateResourceName',
+    'AssociatedOrg',
+    'CountryOfOrigin',
+    'Details',
+    'Director',
+    'EditClass',
+    'Element',
+    'Entry',
+    'EpisodeClass',
+    'MadeForRegion',
+    'MetadataAuthority',
+    'OriginalLanguage',
+    'SeasonClass',
+    'VersionLanguage',
+    'LinkedAlternateID',
+    'URL',
+    'AlternatePartyName',
+    'AllowedRoles',
+    'AlternateServiceName',
+    'OtherAffiliation',
+    'Identifier',
+    'URI',
+    'LinkedCration',
+    'Party-Service',
+  ];
+  
+  // The value on the right is the default property when forcing the object
+  // ex: 'original': 'sampleProp', and the original object has {original: 'hi'}
+  // after parsing, you get  {original: {sampleProp: 'hi'}}
+  const forceObj = {
+    'Description': 'value',
+    'referentCreation.identifier[].type': 'value',
+    'referentCreation.linkedCreation[].identifier.type': 'value',
+    'referentCreation.principalAgent[].identifier.type': 'value'
+  }
+  
+  return _normalize(info);
+  function _normalize(inode, parentName='') {
+
+    // Non-object values end the recursion immediately
+    if (typeof inode !== 'object') {
+      return inode;
+    }
+
+    const onode = {};
+
+    function set(name, value, fullSelfName) {
+      const nm = name.startsWith('md:') ? name.substr(3) : name;
+      if(forceArray.includes(nm) && !Array.isArray(value)) {
+        onode[nm] = [value];
+      } else if(forceObj[fullSelfName] && typeof value !== 'object') {
+        onode[nm] = {
+          [forceObj[fullSelfName]]: value
+        };
+      } else {
+        onode[nm] = value;
+      }
+    }
+
+    // Recursively map the cleaned up fields of the input node
+    // onto a newly created output node
+    Object.entries(inode).map(([name, value]) => {
+      
+      const selfName =  (parentName ? parentName + '.' : '') + name + (Array.isArray(value) ? '[]' : '');
+      // Map every array element into an boject and use the
+      // original propety name in case the child was a string
+      // value instead of a full node.
+      if (Array.isArray(value)) {
+        set(name, value.map(e => _normalize(e, selfName)), selfName);
+      }
+
+      // Add attributes as object element. At some point in the code, attributes are prefixed with '$'.
+      // This will cause issues with Python, so we need to change '$' to '_' for all attribute names
+      // to avoid conflit with other child nodes.
+      else if (name === '$') {
+        Object.entries(value).map(([an, av]) => {
+          const nm = an.startsWith('xsi:') ? an.substr(4) : an;
+          onode['_' + nm] = av;
+        });
+      }
+
+      // Recursively handle child nodes.
+      else if (typeof value === 'object') {
+        set(name, _normalize(value, selfName), selfName);
+      }
+
+      // If a node has attributes and a direct string value (rather
+      // than a child node) then use the parent node's name as
+      // a proprty name for that value.
+      else if (name === '_') {
+        onode.value = value;
+      }
+
+      // Store value
+      else {
+        set(name, value, selfName);
+      }
+    });
+
+    return onode;
+  }
+}
+
 // Script: checkQueryLimits
 const script_9c49905643254b15a4f5644fb1abb6d6 = async (app, size, type, idOnly) => {
   // assumes one of the legal resoltion types
@@ -723,11 +847,14 @@ const script_c0e2c37b707441ddbb0ef94f16bb3e88 = async () => {
     ['ApproxLength', 'ApproximateLength'],
     ['Director-#', 'Credits.Director[].DisplayName'],
     ['Actor-#', 'Credits.Actor[].DisplayName'],
-//RWK Proposal: Change the Alt ID fields so it's just a flag to indicate "Alt IDs go here"
-    ['AlternateID-#', 'AlternateID[].value'],
-    ['AlternateID-#@type', 'AlternateID[]._type'],
-    ['AlternateID-#@domain', 'AlternateID[]._domain'],
-    ['AlternateID-#@relation', 'AlternateID[]._relation'],
+    
+    // Use an AlernateID "flag" for special handling to create dedicated Alt ID output columns
+    ['AlternateID', 'AlternateID'],
+    // ['AlternateID-#', 'AlternateID[].value'],
+    // ['AlternateID-#@type', 'AlternateID[]._type'],
+    // ['AlternateID-#@domain', 'AlternateID[]._domain'],
+    // ['AlternateID-#@relation', 'AlternateID[]._relation'],
+
     ['Registrant', 'Administrators.Registrant'],
     ['MetadataAuthority-#', 'Administrators.MetadataAuthority[]'],
     ['RegistrantExtra', 'RegistrantExtra'],
@@ -749,7 +876,7 @@ const script_c0e2c37b707441ddbb0ef94f16bb3e88 = async () => {
     ['Season_SequenceNumber', 'ExtraObjectMetadata.SeasonInfo.SequenceNumber'],
 // Episode
     ['Episode_Parent', 'ExtraObjectMetadata.EpisodeInfo.Parent'],
-    ['Episode_DistributionNumber', 'ExtraObjectMetadata.EpisodeInfo.SequenceInfo.DistributionNumber'],
+    ['Episode_DistributionNumber', 'ExtraObjectMetadata.EpisodeInfo.SequenceInfo.DistributionNumber.value'],
     ['Episode_DistributionNumber@domain', 'ExtraObjectMetadata.EpisodeInfo.SequenceInfo.DistributionNumber._domain'],
     ['Episode_HouseSequence', 'ExtraObjectMetadata.EpisodeInfo.SequenceInfo.HouseSequence'],
     ['Episode_HouseSequence@domain', 'ExtraObjectMetadata.EpisodeInfo.SequenceInfo.HouseSequence._domain'],
@@ -812,36 +939,42 @@ const script_c0e2c37b707441ddbb0ef94f16bb3e88 = async () => {
     ['Packaging-#ID', 'ExtraObjectMetadata.PackagingInfo[].ID'],
     ['Packaging-#Class', 'ExtraObjectMetadata.PackagingInfo[].PackagingClass'],
 // Provenance (unique values only)
-    ['IssueNumber', 'IssueNumber'],
+    ['Provenance_IssueNumber', 'IssueNumber'],
     ['CreatedBy', 'CreatedBy'],
     ['CreationDate', 'CreationDate'],
     ['LastModifiedBy', 'LastModifiedBy'],
     ['LastModificationDate', 'LastModificationDate'],
     ['PublicationDate', 'PublicationDate'],
-// Alternate IDs does not include any unique values
+// Alternate IDs
+    //All values are defined above
 // Linked Alternate IDs
-    //Contains a 2-level nested array: LinkedAlteranateID | URL. However, since Alt IDs are always assumed to be an array, 
-    //this introduces a second 2-level nested array (though there's only ever one Alt ID per LinkedAlternateID element)
-    ['AlternateID-#', 'LinkedAlternateID[].AlternateID[].value'],
-    ['AlternateID-#@type', 'LinkedAlternateID[].AlternateID[]._type'],
-    ['AlternateID-#@domain', 'LinkedAlternateID[].AlternateID[]._domain'],
-    ['AlternateID-#@relation', 'LinkedAlternateID[].AlternateID[]._relation'],
-    ['AlternateID-#@_URL-#', 'LinkedAlternateID[].URL[].value'],
-    ['AlternateID-#@_URL-#@type', 'LinkedAlternateID[].URL[]._type'],
+    ['LinkedAlternateID-#', 'LinkedAlternateID[].AlternateID[].value'],
+    ['LinkedAlternateID-#@type', 'LinkedAlternateID[].AlternateID[]._type'],
+    ['LinkedAlternateID-#@domain', 'LinkedAlternateID[].AlternateID[]._domain'],
+    ['LinkedAlternateID-#@relation', 'LinkedAlternateID[].AlternateID[]._relation'],
+    ['LinkedAlternateID-#_URL-#', 'LinkedAlternateID[].URL[].value'],
+    ['LinkedAlternateID-#_URL-#@type', 'LinkedAlternateID[].URL[]._type'],
 // Party
+    //ID is defined above
     ['PartyName', 'PartyName.DisplayName'],
-    ['AlternatePartyName-#', 'AlternatePartyName[].value'],
-    ['AlternatePartyName-#@abbreviation', 'AlternatePartyName[]._abbreviation'],
+    ['AlternatePartyName-#', 'AlternatePartyName[]'],
     ['ContactName', 'ContactInfo.Name'],
     ['ContactEmail', 'ContactInfo.PrimaryEmail'],
+    ['Active', 'Active'],
     ['AllowedRoles-#', 'AllowedRoles[]'],
 // Video Service
+    //ID is defined above
     ['ServiceName', 'ServiceName.DisplayName'],
+    ['ServiceName@abbreviation', 'ServiceName._abbreviation'],
     ['AlternateServiceName-#', 'AlternateServiceName[].value'],
+    //@abbreviaion is optional.
     ['AlternateServiceName-#@abbreviation', 'AlternateServiceName[]._abbreviation'],
+    //Alt ID is defined above
+    //Service Description conflicts with BaseObjectData Description -- one is an object, one is not
+//    ['Service_Description', 'Description'],
     ['Service_Parent', 'Parent'],
     ['OtherAffiliation-#', 'OtherAffiliation[]'],
-    ['Active', 'Active'],
+    //Active is defined above
     ['Format', 'Format'],
     ['PrimaryTimeZone', 'PrimaryTimeZone'],
     ['Region', 'Region'],
@@ -860,8 +993,8 @@ const script_c0e2c37b707441ddbb0ef94f16bb3e88 = async () => {
     ['Identifier-#_URI-#', 'referentCreation.identifier[].uri[].value'],
     ['Identifier-#_URI-#@returnType', 'referentCreation.identifier[].uri[]._returnType'],
     ['Identifier-#_URI-#@validNamespace', 'referentCreation.identifier[].uri[]._validNamespace'],
-    ['Identifier-#_Type', 'referentCreation.identifier[].type'],
-//    ['Identifier-#_Type', 'referentCreation.identifier[].type.value'],
+    // SL: Forced create object for id type
+    ['Identifier-#_Type', 'referentCreation.identifier[].type.value'],
     ['Identifier-#_Type_Namespace', 'referentCreation.identifier[].type._validNamespace'],
     ['DOI_StructuralType', 'referentCreation.structuralType'],
     ['DOI_Mode-#', 'referentCreation.mode[]'],
@@ -870,12 +1003,14 @@ const script_c0e2c37b707441ddbb0ef94f16bb3e88 = async () => {
     ['PrincipalAgent-#','referentCreation.principalAgent[].name.value'],
     ['PrincipalAgent-#_Type','referentCreation.principalAgent[].name.type'],
     ['PrincipalAgent-#_Value','referentCreation.principalAgent[].identifier.value'],
-    ['PrincipalAgent-#_ValueType','referentCreation.principalAgent[].identifier.type'],
+    // SL: Forced create object for id type
+    ['PrincipalAgent-#_ValueType','referentCreation.principalAgent[].identifier.type.value'],
     ['PrincipalAgent-#_Role','referentCreation.principalAgent[].role'],
     ['LinkedCreation-#_Identifier-#','referentCreation.linkedCreation[].identifier[].nonUriValue'],
     ['LinkedCreation-#_Identifier-#_URI-#','referentCreation.linkedCreation[].identifier[].uri[].value'],
     ['LinkedCreation-#_Identifier-#_URI#@returnType','referentCreation.linkedCreation[].identifier[].uri[]._returnType'],
-    ['LinkedCreation-#_Identifier-#_Type','referentCreation.linkedCreation[].identifier[].type'],
+    // SL: Forced create object for id type
+    ['LinkedCreation-#_Identifier-#_Type','referentCreation.linkedCreation[].identifier[].type.value'],
     ['LinkedCreation-#_Identifier-#_Type@namespace','referentCreation.linkedCreation[].identifier[].type._validNamespace'],
     ['LinkedCreation-#_Role','referentCreation.linkedCreation[].linkedCreationRole'],
     ['Party-Service-#', 'referentParty.name[].value'],
@@ -887,8 +1022,9 @@ const script_c0e2c37b707441ddbb0ef94f16bb3e88 = async () => {
     ['Party-ServiceLinkedParty', 'referentParty.linkedParty'],
     
  ];
-
+ 
 }
+
 
 // Script: tabelize
 const script_110622f3ccda4a8d965656861a1f082e = async (event) => {
@@ -943,7 +1079,32 @@ const script_110622f3ccda4a8d965656861a1f082e = async (event) => {
 //Add in special code to sort the funky Alt ID fields (grouping ID types together) -- you could create a temporary 
 //array of the Alt IDs actually in play and sort/group them, then use that to order the Alt ID fields.
 
+    // SL: 
+    function addAltIDHeaders() {
+      masterKey = [];
+      event.shallows.forEach((shallow, i) => {
+        keys = Object.keys(shallow).filter((key) => {
+          return key.indexOf('AlternateID_') === 0 && masterKey.indexOf(key) === -1;
+        });
+        masterKey.push(...keys);
+      })
+  
+      return masterKey
+      //.sort((a, b) => {
+        // sort here;
+      //})
+    }
+    // SL: End
+    
     for (const [property, path] of fields) {
+      
+      // SL: Custom logic for Alternate ID
+      if(property === 'AlternateID') {
+        nestedList.push(...addAltIDHeaders())
+        continue;
+      }
+      // SL: End
+      
       const split = property.split('-#');
       const nestingLevel = split.length - 1;
       const arrayName = split[split.length - 2];
@@ -991,9 +1152,22 @@ const script_110622f3ccda4a8d965656861a1f082e = async (event) => {
     }
 
     function addArray(array, indexes = []) {
-      if (array.length === 0 || array[0].length === 0) {
-        return
+      
+      // RMK: Check for empty arrays even if they are nested
+      
+      //if (array.length === 0 || array[0].length === 0) {
+      //  return
+      //}
+      
+      let tempArr = array;
+      while(Array.isArray(tempArr)) {
+        tempArr = tempArr[0];
       }
+      if(!tempArr) {
+        return;
+      }
+      // RMK End
+      
       const nm = replaceWithIndexes(array[0], indexes, true); // header[0] might be an array
       const num = `Num_${nm}`;
       headerList.push(num);
@@ -1059,255 +1233,6 @@ const script_8c9cf40cbc204476963d23d969224a34 = async (event, app) => {
   return tableStringify({ table, separator: '\t' });
 }
 
-// Script: zzQuery
-const script_aec7f2c1ef0b4aabb3b01dcd2cd494b1 = async (event, app) => {
-
-  function assertSingleProperty(obj) {
-    if (typeof obj !== 'object') {
-      throw new Error(`Not an object: ${JSON.stringify(obj)}`);
-    }
-    if (Object.keys(obj).length !== 1) {
-      throw new Error(
-        `Object must have one single property: ${JSON.stringify(obj)}`
-      );
-    }
-    return [Object.keys(obj)[0], Object.values(obj)[0]];
-  }
-
-  function nary(op, expressions) {
-    op = op.toUpperCase()
-    if (!Array.isArray(expressions)) {
-      throw new Error(`${op} requires an array: ${expressions}`);
-    }
-    for (const expression of expressions) {
-      if (typeof expression !== 'string' || expression.trim().length === 0) {
-        throw new Error(`${op} requires string expressions: ${expression}`);
-      }
-    }
-    const many = 1 < expressions.length;
-    return `${many ? '(' : ''}${
-      expressions.map(e => e.trim()).join(` ${op} `)
-    }${many ? ')' : ''}`;
-  }
-
-  function OR(expressions) {
-    return nary('or', expressions);
-  }
-
-  function NOT(expression) {
-    if (typeof expression !== 'string' || expression.trim().length === 0) {
-      throw new Error(`NOT requires a string expression: ${expression}`);
-    }
-    return `(NOT ${expression})`
-  }
-
-  const textElements = {
-    title: ['ResourceName'],
-    alttitle: ['AlternateResourceName'],
-    anytitle: ['ResourceName', 'AlternateResourceName'],
-//  date: ['ReleaseDate'],
-//  length: ['ApproximateLength'],
-    coo: ['CountryOfOrigin'],
-    struct: ['StructuralType'],
-    reftype: ['ReferentType'],
-    lang: ['OriginalLanguage'],
-    aoname: ['AssociatedOrg/DisplayName'],
-    aoaltname: ['Associatedorg/AlternateName'],
-    aoanyname: ['AssociatedOrg/DisplayName', 'AssociatedOrg/AlternateName'],
-    aoid: ['AssociatedOrg@organizationID'],
-    actor: ['Credits/Actor/DisplayName'],
-    director: ['Credits/Director/DisplayName'], 
-    contributor: ['Credits/Director/DisplayName','Credits/Actor/DisplayName'],
-    altid: ['AlternateID'],
-    altidtype: ['AlternateID@type'],
-    altiddomain: ['AlternateID@domain'],
-  };
-
-  function textQuery(key, obj) {
-    const [op, list] = assertSingleProperty(obj);
-    if (typeof list !== 'string') {
-      throw new Error(`Invalid text query word list: ${list}`);
-    }
-    const words = list.split(' ').filter(s => 0 < s.length);
-    if (words.length === 0) {
-      throw new Error(`Empty text query word list: ${list}`);
-    }
-    const te = textElements[key].map(p => `/FullMetadata/BaseObjectData/${p}`);
-    switch (op) {
-      case 'words':
-        return OR(te.map(p => words.map(w => `(${p} ${w})`)).flat());
-      case 'contains':
-        return OR(te.map(p => `(${p} "${words.join(' ')}")`));
-      case 'exact':
-        return OR(te.map(p => `(${p} IS "${words.join(' ')}")`));
-      default:
-        throw new Error(`Invalid text query operation: ${op}`);
-    }
-  }
-
-  function dateQuery(obj) {
-    const [op, date] = assertSingleProperty(obj);
-    if (typeof date !== 'string' || date.trim().length === 0) {
-      throw new Error(`Invalid date: ${date}`);
-    }
-    switch (op) {
-      case 'date':
-        return `(/FullMetadata/BaseObjectData/ReleaseDate ${date})`;
-      case 'before':
-        return `(/FullMetadata/BaseObjectData/ReleaseDate <= ${date})`;
-      case 'after':
-        return `(/FullMetadata/BaseObjectData/ReleaseDate >= ${date})`;
-      default:
-        throw new Error(`Invalid date query operation: ${op}`);
-    }
-  }
-
-  function lengthQuery(obj) {
-    const [op, length] = assertSingleProperty(obj);
-    if (typeof length !== 'string' || length.trim().length === 0) {
-      throw new Error(`Invalid length: ${length}`);
-    }
-    switch (op) {
-      case 'length':
-        return `(/FullMetadata/BaseObjectData/ApproximateLength ${length})`;
-      case 'maxlength':
-        return `(/FullMetadata/BaseObjectData/ApproximateLength <= ${length})`;
-      case 'minlength':
-        return `(/FullMetadata/BaseObjectData/ApproximateLength >= ${length})`;
-      default:
-        throw new Error(`Invalid length query operation: ${op}`);
-    }
-  }
-
-  function existsQuery(element) {
-    if (element === 'date') {
-      return `(/FullMetadata/BaseObjectData/ReleaseDate EXISTS)`;
-    }
-    if (element === 'length') {
-      return `(/FullMetadata/BaseObjectData/ApproximateLength EXISTS)`;
-    }
-    if (!(element in textElements)) {
-      throw new Error(`Invalid element: ${element}`);
-    }
-    if (textElements[element].length !== 1) {
-      throw new Error(`Invalid element for EXISTS query: ${element}`);
-    }
-    return `(/FullMetadata/BaseObjectData/${textElements[element][0]} EXISTS)`;
-  }
-
-  function isRootQuery() {
-    return NOT(OR([
-      '(/FullMetadata/ExtraObjectMetadata/SeasonInfo EXISTS)',
-      '(/FullMetadata/ExtraObjectMetadata/ClipInfo EXISTS)',
-      '(/FullMetadata/ExtraObjectMetadata/ManifestationInfo EXISTS)',
-      '(/FullMetadata/ExtraObjectMetadata/EpisodeInfo EXISTS)',
-      '(/FullMetadata/ExtraObjectMetadata/EditInfo EXISTS)',
-    ]));
-  }
-
-  function parentQuery(id) {
-    if (typeof id !== 'string' || id.trim().length === 0) {
-      throw new Error(`Invalida parent ID: ${id}`);
-    }
-    return OR([
-      `(/FullMetadata/ExtraObjectMetadata/SeasonInfo/Parent ${id})`,
-      `(/FullMetadata/ExtraObjectMetadata/ClipInfo/Parent ${id})`,
-      `(/FullMetadata/ExtraObjectMetadata/ManifestationInfo/Parent ${id})`,
-      `(/FullMetadata/ExtraObjectMetadata/EpisodeInfo/Parent ${id})`,
-      `(/FullMetadata/ExtraObjectMetadata/EditInfo/Parent ${id})`,
-    ]);
-  }
-
-  function query(obj) {
-    const [element, value] = assertSingleProperty(obj)
-    if (element === 'and' || element === 'or') {
-      return nary(element, value.map(query));
-    }
-    if (element === 'not') {
-      return NOT(value);
-    }
-    if (element in textElements) {
-      return textQuery(element, value);
-    }
-    if (element === 'date') {
-      return dateQuery(value);
-    }
-    if (element === 'length') {
-      return lengthQuery(value);
-    }
-    if (element === 'exists') {
-      return existsQuery(value);
-    }
-    if (element === 'isroot') {
-      return isRootQuery();
-    }
-    if (element === 'parent') {
-      return parentQuery(value);
-    }
-    throw new Error(`Invalid element: ${element}`);
-  }
-
-  const qs = query(event.req.body);
-  console.log(qs);
-  await app.getConnector('eidr').query(qs);
-  return event.res.send(qs);
-
-  // Questions:
-  // 1. Shouldn't 'and' and 'or' have array values (in the doc these are objects)?
-  // 2. Can we use 'name' and 'title' istead of 'includealt'?
-  // 3. Not sure about EXISTS - should this simply be a string path?
-
-  // CURL:
-  // curl -XPOST -H"Content-Type:application/json" -d'{"title":{"exact":"abominable"}}' https://eidr-dev-runtime.reshuffle.app/zz
-
-  // Tests:
- 
-  // { title: { words: 'star wars' }, length: 3 }
-  // Error: Object must have one single property
-
-  // { title: { words: 'star wars' } }
-  // ((/FullMetadata/BaseObjectData/ResourceName star) OR (/FullMetadata/BaseObjectData/ResourceName wars))
-
-  // { alltitles: { words: 'star wars' } }
-  // ((/FullMetadata/BaseObjectData/ResourceName star) OR (/FullMetadata/BaseObjectData/ResourceName wars) OR (/FullMetadata/BaseObjectData/AlternateResourceName star) OR (/FullMetadata/BaseObjectData/AlternateResourceName wars))
-
-  // { and: [{ title: { contains: 'star wars' } }, { coo: { exact: 'us' } }] }
-  // ((/FullMetadata/BaseObjectData/ResourceName "star wars") AND (/FullMetadata/BaseObjectData/CountryOfOrigin IS "us"))
-
-  // { or: [{ title: { contains: 'star wars' } }, { coo: { exact: 'us' } }] }
-  // ((/FullMetadata/BaseObjectData/ResourceName "star wars") OR (/FullMetadata/BaseObjectData/CountryOfOrigin IS "us"))
-
-  // { not: { title: { contains: 'star wars' } } }
-  // (NOT (/FullMetadata/BaseObjectData/ResourceName "star wars"))
-
-  // { date: { date: '2000' } }
-  // (/FullMetadata/BaseObjectData/ReleaseDate 2000)
-
-  // { date: { before: '2000' } }
-  // (/FullMetadata/BaseObjectData/ReleaseDate <= 2000)
-
-  // { date: { after: '2000' } }
-  // (/FullMetadata/BaseObjectData/ReleaseDate >= 2000)
-
-  // { length: { length: 'PT23M' } }
-  // (/FullMetadata/BaseObjectData/ApproximateLength PT23M)
-
-  // { length: { maxlength: 'PT23M' } }
-  // (/FullMetadata/BaseObjectData/ApproximateLength <= PT23M)
-
-  // { length: { minlength: 'PT23M' } }
-  // (/FullMetadata/BaseObjectData/ApproximateLength >= PT23M)
-
-  // { exists: 'actor' }
-  // (/FullMetadata/BaseObjectData/Credits/Actor/DisplayName EXISTS)
-
-  // { isroot: true }
-  // (NOT ((/FullMetadata/ExtraObjectMetadata/SeasonInfo EXISTS) OR (/FullMetadata/ExtraObjectMetadata/ClipInfo EXISTS) OR (/FullMetadata/ExtraObjectMetadata/ManifestationInfo EXISTS) OR (/FullMetadata/ExtraObjectMetadata/EpisodeInfo EXISTS) OR (/FullMetadata/ExtraObjectMetadata/EditInfo EXISTS)))
-
-  // { parent: '10.5240/75C0-4663-9D6D-C864-1D9B-I' }
-  // (NOT ((/FullMetadata/ExtraObjectMetadata/SeasonInfo/Parent 10.5240/75C0-4663-9D6D-C864-1D9B-I) OR (/FullMetadata/ExtraObjectMetadata/ClipInfo/Parent 10.5240/75C0-4663-9D6D-C864-1D9B-I) OR (/FullMetadata/ExtraObjectMetadata/ManifestationInfo/Parent 10.5240/75C0-4663-9D6D-C864-1D9B-I) OR (/FullMetadata/ExtraObjectMetadata/EpisodeInfo/Parent 10.5240/75C0-4663-9D6D-C864-1D9B-I) OR (/FullMetadata/ExtraObjectMetadata/EditInfo/Parent 10.5240/75C0-4663-9D6D-C864-1D9B-I)))
-}
-
 // Script: shallow
 const script_0f3d9ccd2de440d98c827c2b3f5ddd8b = //
 // Convert EIDR resource info into shallow (un-nested) object.
@@ -1327,6 +1252,32 @@ async (event) => {
     flatten(shallow, property, event.nested, path)
   }
   return shallow;
+  
+  // SL: Flatten alt ids list
+  function flattenAltID(tgt, altIDList) {
+    currentItemCount = {};
+    
+    function createAltIDProp(name, src) {
+      if(currentItemCount[name]) {
+          currentItemCount[name] ++;
+        } else {
+          currentItemCount[name] = 1;
+        }
+        tgt['AlternateID_' + name + '-' + currentItemCount[name]] = src.value;
+        if(src._relation) {
+          tgt['AlternateID_' + name + '-' + currentItemCount[name] + '@relation'] = src._relation;
+        }
+    }
+    
+    altIDList.forEach((src, i) => {
+      if(src._type === 'Proprietary') {
+        createAltIDProp(src._domain, src);
+      } else {
+        createAltIDProp(src._type, src);
+      }
+    })
+  }
+  // SL: End
 
   //
   // Recusively extract a path from a nested object and populate a flat
@@ -1358,7 +1309,12 @@ async (event) => {
 //counter, you either need to sort the JSON by Type and Domain before you shallow or you need to maintain a temporary table 
 //of the Alt IDs encountered in the record (since Alt IDs of the same type won't always be consecutive)
 
-    if (!next && rest.endsWith('?')) {
+    // SL: If alternate id, do alternate id specific flattening
+    if(property === 'AlternateID' && src[property] && src[property].length) {
+      flattenAltID(tgt, src[property]);
+    }
+    // SL: End
+    else if (!next && rest.endsWith('?')) {
       const nm = indexes.reduce((s, i) => s.replace('#', i), property);
       tgt[nm] = src[rest.substr(0, rest.length - 1)] ? 'TRUE' : '';
     }
@@ -1373,7 +1329,7 @@ async (event) => {
       const prop = rest.substr(0, rest.length - 2)
 
       const array = src[prop];
-      if (array && array.length) {
+      if (Array.isArray(array) && array && array.length) {
         array.forEach((item, i) => {
           const nm = [...indexes, i + 1].reduce((s, i) => s.replace('#', i), property);
           tgt[nm] = item;
@@ -1385,10 +1341,11 @@ async (event) => {
     // This is an object array, flatten every element separately
     else if (next.endsWith('[]')) {
       const object = src[next.substr(0, next.length - 2)];
-      const array = Array.isArray(object) ? object : [object];
+      let array = Array.isArray(object) ? object : [object];
       array.map((element, index) => {
         flatten(tgt, property, element, rest, [...indexes, index + 1]);
       });
+      array = array.filter(item => item !== undefined && item !== null);
       if (!property.includes('@')) {
         tgt['Num_' + property.split('-')[0]] = array.length;
       }
@@ -1401,113 +1358,6 @@ async (event) => {
   }
 }
 
-
-// Script: normalize
-const script_7593e0bc639f4ef783900dd0495ad7ef = //
-// Recursively clean up nodes in the information object
-// returned from the EIDR API. The object properties are
-// traversed and nested objects are treated resusively.
-//
-// @param inode      EIDR information object or a nested
-//                   object
-//
-// @param parentName (optional) name of parent node (used
-//                   for handling arrays)
-//
-// @return cleaned up information object
-//
-async ({ info }) => {
-  return _normalize(info);
-
-  function _normalize(inode, parentName) {
-
-    const forceArray = [
-      'Actor',
-      'AlternateName',
-      'AlternateNumber',
-      'AlternateID',
-      'AlternateResourceName',
-      'AssociatedOrg',
-      'CountryOfOrigin',
-      'Details',
-      'Director',
-      'EditClass',
-      'Element',
-      'Entry',
-      'EpisodeClass',
-      'MadeForRegion',
-      'MetadataAuthority',
-      'OriginalLanguage',
-      'SeasonClass',
-      'VersionLanguage',
-      'LinkedAlternateID',
-      'URL',
-      'AlternatePartyName',
-      'AllowedRoles',
-      'AlternateServiceName',
-      'OtherAffiliation',
-      'Identifier',
-      'URI',
-      'LinkedCration',
-      'Party-Service',
-      
-    ];
-
-    // Non-object values end the recursion immediately
-    if (typeof inode !== 'object') {
-      return inode;
-    }
-
-    const onode = {};
-
-    function set(name, value) {
-      const nm = name.startsWith('md:') ? name.substr(3) : name;
-      const shouldForceArray = forceArray.includes(nm) && !Array.isArray(value);
-      onode[nm] = shouldForceArray ? [value] : value;
-    }
-
-    // Recursively map the cleaned up fields of the input node
-    // onto a newly created output node
-    Object.entries(inode).map(([name, value]) => {
-
-      // Map every array element into an boject and use the
-      // original propety name in case the child was a string
-      // value instead of a full node.
-      if (Array.isArray(value)) {
-        set(name, value.map(e => _normalize(e, name)));
-      }
-
-      // Add attributes as object element. At some point in the code, attributes are prefixed with '$'.
-      // This will cause issues with Python, so we need to change '$' to '_' for all attribute names
-      // to avoid conflit with other child nodes.
-      else if (name === '$') {
-        Object.entries(value).map(([an, av]) => {
-          const nm = an.startsWith('xsi:') ? an.substr(4) : an;
-          onode['_' + nm] = av;
-        });
-      }
-
-      // Recursively handle child nodes.
-      else if (typeof value === 'object') {
-        set(name, _normalize(value, name));
-      }
-
-      // If a node has attributes and a direct string value (rather
-      // than a child node) then use the parent node's name as
-      // a proprty name for that value.
-      else if (name === '_') {
-        onode.value = value;
-      }
-
-      // Store value
-      else {
-        set(name, value);
-      }
-    });
-
-    return onode;
-  }
-}
 
 // Script: __Health
 const script_bfd0b9b74ce444de86575c84d2a6b55b = async (event, app) => {
@@ -1653,15 +1503,6 @@ app.getLogger().error('Runtime Http event creation error. Review configuration f
 }
 try {
 HttpConnector__API_bdde19de936d49c6a266aae83766cdf6 && HttpConnector__API_bdde19de936d49c6a266aae83766cdf6.on(
-{'method':'POST', 'path':'zz'}
-, script_aec7f2c1ef0b4aabb3b01dcd2cd494b1, '53b701c3-90ac-4ddc-b545-0bc4f7330bd3')
-
-}
-catch (err) {
-app.getLogger().error('Runtime Http event creation error. Review configuration for event zz', err)
-}
-try {
-HttpConnector__API_bdde19de936d49c6a266aae83766cdf6 && HttpConnector__API_bdde19de936d49c6a266aae83766cdf6.on(
 {'method':'GET', 'path':'--health'}
 , script_bfd0b9b74ce444de86575c84d2a6b55b, '9bb3aa24-5caf-4748-a9bd-63f53dbd85cc')
 
@@ -1693,14 +1534,13 @@ app.registerHandler(script_c63ded14d69d46f2be3580530e41603c, 'c63ded14-d69d-46f2
 app.registerHandler(script_c85e6c85f0e4480fb31b07e7f2ea53bc, 'c85e6c85-f0e4-480f-b31b-07e7f2ea53bc', 'resolveID')
 app.registerHandler(script_d687e6f96b0c4c23818d2dd7b2b0f43c, 'd687e6f9-6b0c-4c23-818d-2dd7b2b0f43c', 'queryHelper')
 app.registerHandler(script_108dfe6c53a947e3a6e050aa57660c2c, '108dfe6c-53a9-47e3-a6e0-50aa57660c2c', 'tableStringify')
+app.registerHandler(script_7593e0bc639f4ef783900dd0495ad7ef, '7593e0bc-639f-4ef7-8390-0dd0495ad7ef', 'normalize')
 app.registerHandler(script_9c49905643254b15a4f5644fb1abb6d6, '9c499056-4325-4b15-a4f5-644fb1abb6d6', 'checkQueryLimits')
 app.registerHandler(script_5f69cad3062747cc9c19362d420b4648, '5f69cad3-0627-47cc-9c19-362d420b4648', 'sortResults')
 app.registerHandler(script_c0e2c37b707441ddbb0ef94f16bb3e88, 'c0e2c37b-7074-41dd-bb0e-f94f16bb3e88', 'shallowFields')
 app.registerHandler(script_110622f3ccda4a8d965656861a1f082e, '110622f3-ccda-4a8d-9656-56861a1f082e', 'tabelize')
 app.registerHandler(script_8c9cf40cbc204476963d23d969224a34, '8c9cf40c-bc20-4476-963d-23d969224a34', 'tsv')
-app.registerHandler(script_aec7f2c1ef0b4aabb3b01dcd2cd494b1, 'aec7f2c1-ef0b-4aab-b3b0-1dcd2cd494b1', 'zzQuery')
 app.registerHandler(script_0f3d9ccd2de440d98c827c2b3f5ddd8b, '0f3d9ccd-2de4-40d9-8c82-7c2b3f5ddd8b', 'shallow')
-app.registerHandler(script_7593e0bc639f4ef783900dd0495ad7ef, '7593e0bc-639f-4ef7-8390-0dd0495ad7ef', 'normalize')
 app.registerHandler(script_bfd0b9b74ce444de86575c84d2a6b55b, 'bfd0b9b7-4ce4-44de-8657-5c84d2a6b55b', '__Health')
 app.registerHandler(script_732731b8b1fa4a069e751d8f9576a939, '732731b8-b1fa-4a06-9e75-1d8f9576a939', 'sorter')
 app.registerHandler(script_86b3e96c564d4b9da741ddb83ea10d2c, '86b3e96c-564d-4b9d-a741-ddb83ea10d2c', '__Version')
