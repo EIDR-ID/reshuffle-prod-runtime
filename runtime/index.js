@@ -768,6 +768,43 @@ const script_5f69cad3062747cc9c19362d420b4648 = async (app, records, sort, order
     return records;
 }
 
+// Script: Query
+const script_1fe9472b38044f93acc1361e0ff8f4f4 = async (event, app) => {
+  const { req, res } = event;
+  console.log('Query POST')
+  const tsv = app.getScript('tsv');
+  const queryHelper = app.getScript('queryHelper');
+  const sortResults = app.getScript('sortResults');
+
+  let { results, types } = await queryHelper(event, app)
+  if (!results) {
+    return
+  }
+
+console.log("queryHelper got results")
+  if (req.query && req.query.sort){ 
+    const sorted = await sortResults(app, results.results, req.query.sort, req.query.order)
+    results.results = sorted;
+  }
+
+  console.log("query sorting done")
+  
+  if (results.idOnly && types.format === "tsv") {
+    const list =["EIDR_ID"].concat(results.results)
+    return(res.send(list.join("\n")))
+  }
+  
+  return types.format === 'tsv' ? 
+    res
+      .set({'Content-Type': 'text/tab-separated-values'})
+      .send(await tsv({
+        infos: results.results,
+        pageNumber: results.pageNumber,
+        pageSize: results.pageSize,
+      }, app)) : 
+    res.json(results);
+}
+
 // Script: shallowFields
 const script_c0e2c37b707441ddbb0ef94f16bb3e88 = async () => {
 
@@ -939,8 +976,7 @@ const script_c0e2c37b707441ddbb0ef94f16bb3e88 = async () => {
     //@abbreviaion is optional.
     ['AlternateServiceName-#@abbreviation', 'AlternateServiceName[]._abbreviation'],
     //Alt ID is defined above
-    //Service Description conflicts with BaseObjectData Description -- one is an object, one is not
-//    ['Service_Description', 'Description'],
+    //Description is defined above
     ['Service_Parent', 'Parent'],
     ['OtherAffiliation-#', 'OtherAffiliation[]'],
     //Active is defined above
@@ -962,7 +998,6 @@ const script_c0e2c37b707441ddbb0ef94f16bb3e88 = async () => {
     ['Identifier-#_URI-#', 'referentCreation.identifier[].uri[].value'],
     ['Identifier-#_URI-#@returnType', 'referentCreation.identifier[].uri[]._returnType'],
     ['Identifier-#_URI-#@validNamespace', 'referentCreation.identifier[].uri[]._validNamespace'],
-    // SL: Forced create object for id type
     ['Identifier-#_Type', 'referentCreation.identifier[].type.value'],
     ['Identifier-#_Type_Namespace', 'referentCreation.identifier[].type._validNamespace'],
     ['DOI_StructuralType', 'referentCreation.structuralType'],
@@ -972,13 +1007,11 @@ const script_c0e2c37b707441ddbb0ef94f16bb3e88 = async () => {
     ['PrincipalAgent-#','referentCreation.principalAgent[].name.value'],
     ['PrincipalAgent-#_Type','referentCreation.principalAgent[].name.type'],
     ['PrincipalAgent-#_Value','referentCreation.principalAgent[].identifier.value'],
-    // SL: Forced create object for id type
     ['PrincipalAgent-#_ValueType','referentCreation.principalAgent[].identifier.type.value'],
     ['PrincipalAgent-#_Role','referentCreation.principalAgent[].role'],
     ['LinkedCreation-#_Identifier-#','referentCreation.linkedCreation[].identifier[].nonUriValue'],
     ['LinkedCreation-#_Identifier-#_URI-#','referentCreation.linkedCreation[].identifier[].uri[].value'],
     ['LinkedCreation-#_Identifier-#_URI#@returnType','referentCreation.linkedCreation[].identifier[].uri[]._returnType'],
-    // SL: Forced create object for id type
     ['LinkedCreation-#_Identifier-#_Type','referentCreation.linkedCreation[].identifier[].type.value'],
     ['LinkedCreation-#_Identifier-#_Type@namespace','referentCreation.linkedCreation[].identifier[].type._validNamespace'],
     ['LinkedCreation-#_Role','referentCreation.linkedCreation[].linkedCreationRole'],
@@ -994,43 +1027,6 @@ const script_c0e2c37b707441ddbb0ef94f16bb3e88 = async () => {
  
 }
 
-
-// Script: Query
-const script_1fe9472b38044f93acc1361e0ff8f4f4 = async (event, app) => {
-  const { req, res } = event;
-  console.log('Query POST')
-  const tsv = app.getScript('tsv');
-  const queryHelper = app.getScript('queryHelper');
-  const sortResults = app.getScript('sortResults');
-
-  let { results, types } = await queryHelper(event, app)
-  if (!results) {
-    return
-  }
-
-console.log("queryHelper got results")
-  if (req.query && req.query.sort){ 
-    const sorted = await sortResults(app, results.results, req.query.sort, req.query.order)
-    results.results = sorted;
-  }
-
-  console.log("query sorting done")
-  
-  if (results.idOnly && types.format === "tsv") {
-    const list =["EIDR_ID"].concat(results.results)
-    return(res.send(list.join("\n")))
-  }
-  
-  return types.format === 'tsv' ? 
-    res
-      .set({'Content-Type': 'text/tab-separated-values'})
-      .send(await tsv({
-        infos: results.results,
-        pageNumber: results.pageNumber,
-        pageSize: results.pageSize,
-      }, app)) : 
-    res.json(results);
-}
 
 // Script: tsv
 const script_8c9cf40cbc204476963d23d969224a34 = async (event, app) => {
@@ -1178,34 +1174,40 @@ const script_110622f3ccda4a8d965656861a1f082e = async (event) => {
     }
 
     function addArray(array, indexes = []) {
-      
-      // RMK: Check for empty arrays even if they are nested
-      
-      //if (array.length === 0 || array[0].length === 0) {
-      //  return
-      //}
-      
       let tempArr = array;
-      while(Array.isArray(tempArr)) {
+      while (Array.isArray(tempArr)) {
         tempArr = tempArr[0];
       }
-      if(!tempArr) {
+      if (!tempArr) {
         return;
       }
-      // RMK End
-      
+  
       const nm = replaceWithIndexes(array[0], indexes, true); // header[0] might be an array
       const num = `Num_${nm}`;
-      headerList.push(num);
+      if(headerList.indexOf(num) === -1) {
+        headerList.push(num);
+      } else {
+        return;
+      }
+  
       const count = Math.max(
         ...shallows.map(shallow => shallow[num] || 0)
       );
+      
       for (let i = 1; i <= count; i++) {
         const idx = [...indexes, i];
-        for (j = 0; j < array.length; j++) {
+        for (let j = 0; j < array.length; j++) {
           const hd = array[j];
+          const newHd = [];
           if (Array.isArray(hd)) {
-            addArray(hd, idx)
+            for(let k = 0; k < hd.length; k++) {
+              if(typeof hd[k] === 'string') {
+                newHd[k] = replaceWithIndexes(hd[k], idx);
+              } else {
+                newHd[k] = hd[k];
+              }
+            }
+            addArray(newHd, [])
           } else {
             const key = replaceWithIndexes(hd, idx);
             if (headerMap[key]) {
@@ -1291,6 +1293,18 @@ async (event) => {
   }
   // SL: End
 
+  
+  function replaceWithIndexes(str, indexes, trim = false) {
+    const max = trim ? indexes.length : Number.MAX_SAFE_INTEGER;
+    const alt = trim ? '' : '-#';
+    const array = str
+      .split('-#')
+      .filter((s, i) => i <= max)
+      .map((s, i) => ([s, i < indexes.length ? `-${indexes[i]}` : alt]))
+      .flat()
+    return array.slice(0, array.length - 1).join('');
+  }
+  
   //
   // Recusively extract a path from a nested object and populate a flat
   // object.
@@ -1315,11 +1329,6 @@ async (event) => {
 
     // No next means this is the last step in the recursion over path
     // elements and rest is the last property name
-
-//RWK Proposal:
-//Add in a test for the funky Alt ID flag to set up the custom Alt ID columns (sort will come later). To manage the column
-//counter, you either need to sort the JSON by Type and Domain before you shallow or you need to maintain a temporary table 
-//of the Alt IDs encountered in the record (since Alt IDs of the same type won't always be consecutive)
 
     // SL: If alternate id, do alternate id specific flattening
     if(property === 'AlternateID' && src[property] && src[property].length) {
@@ -1358,8 +1367,16 @@ async (event) => {
         flatten(tgt, property, element, rest, [...indexes, index + 1]);
       });
       array = array.filter(item => item !== undefined && item !== null);
+      
       if (!property.includes('@')) {
-        tgt['Num_' + property.split('-')[0]] = array.length;
+        if(indexes && indexes.length) {
+          const propArray = property.split('-');
+          propArray.pop();
+          const name = 'Num_' + replaceWithIndexes(propArray.join('-'), indexes);
+          tgt[name] = array.length;
+        } else {
+          tgt['Num_' +  property.split('-')[0]] = array.length;
+        }
       }
     }
 
@@ -1548,8 +1565,8 @@ app.registerHandler(script_108dfe6c53a947e3a6e050aa57660c2c, '108dfe6c-53a9-47e3
 app.registerHandler(script_7593e0bc639f4ef783900dd0495ad7ef, '7593e0bc-639f-4ef7-8390-0dd0495ad7ef', 'normalize')
 app.registerHandler(script_9c49905643254b15a4f5644fb1abb6d6, '9c499056-4325-4b15-a4f5-644fb1abb6d6', 'checkQueryLimits')
 app.registerHandler(script_5f69cad3062747cc9c19362d420b4648, '5f69cad3-0627-47cc-9c19-362d420b4648', 'sortResults')
-app.registerHandler(script_c0e2c37b707441ddbb0ef94f16bb3e88, 'c0e2c37b-7074-41dd-bb0e-f94f16bb3e88', 'shallowFields')
 app.registerHandler(script_1fe9472b38044f93acc1361e0ff8f4f4, '1fe9472b-3804-4f93-acc1-361e0ff8f4f4', 'Query')
+app.registerHandler(script_c0e2c37b707441ddbb0ef94f16bb3e88, 'c0e2c37b-7074-41dd-bb0e-f94f16bb3e88', 'shallowFields')
 app.registerHandler(script_8c9cf40cbc204476963d23d969224a34, '8c9cf40c-bc20-4476-963d-23d969224a34', 'tsv')
 app.registerHandler(script_110622f3ccda4a8d965656861a1f082e, '110622f3-ccda-4a8d-9656-56861a1f082e', 'tabelize')
 app.registerHandler(script_0f3d9ccd2de440d98c827c2b3f5ddd8b, '0f3d9ccd-2de4-40d9-8c82-7c2b3f5ddd8b', 'shallow')
