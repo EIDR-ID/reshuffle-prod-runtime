@@ -27,37 +27,6 @@ app.getLogger().error('Runtime EIDRConnector instantiation error. Review configu
 
 /** Scripts definitions **/
 
-// Script: Query
-const script_1fe9472b38044f93acc1361e0ff8f4f4 = async (event, app) => {
-  const { req, res } = event;
-  console.log('Query POST')
-  const tsv = app.getScript('tsv');
-  const queryHelper = app.getScript('queryHelper');
-  const sortResults = app.getScript('sortResults');
-
-  let { results, types } = await queryHelper(event, app)
-  if (!results) {
-    return
-  }
-
-console.log("queryHelper got results")
-  if (req.query && req.query.sort){ 
-    const sorted = await sortResults(app, results.results, req.query.sort, req.query.order)
-    results.results = sorted;
-  }
-
-  console.log("query sorting done")
-  
-  if (results.idOnly && types.format === "tsv") {
-    const list =["EIDR_ID"].concat(results.results)
-    return(res.send(list.join("\n")))
-  }
-  
-  return types.format === 'tsv' ? 
-    res.set({'Content-Type': 'text/tab-separated-values'}).send(await tsv({infos:results.results}, app)) : 
-    res.json(results);
-}
-
 // Script: getValidatedTypes
 const script_d341c1cf401f447388c965f4d896e4fe = // Get validated type information from an HTTP request.
 //
@@ -1026,13 +995,73 @@ const script_c0e2c37b707441ddbb0ef94f16bb3e88 = async () => {
 }
 
 
+// Script: Query
+const script_1fe9472b38044f93acc1361e0ff8f4f4 = async (event, app) => {
+  const { req, res } = event;
+  console.log('Query POST')
+  const tsv = app.getScript('tsv');
+  const queryHelper = app.getScript('queryHelper');
+  const sortResults = app.getScript('sortResults');
+
+  let { results, types } = await queryHelper(event, app)
+  if (!results) {
+    return
+  }
+
+console.log("queryHelper got results")
+  if (req.query && req.query.sort){ 
+    const sorted = await sortResults(app, results.results, req.query.sort, req.query.order)
+    results.results = sorted;
+  }
+
+  console.log("query sorting done")
+  
+  if (results.idOnly && types.format === "tsv") {
+    const list =["EIDR_ID"].concat(results.results)
+    return(res.send(list.join("\n")))
+  }
+  
+  return types.format === 'tsv' ? 
+    res
+      .set({'Content-Type': 'text/tab-separated-values'})
+      .send(await tsv({
+        infos: results.results,
+        pageNumber: results.pageNumber,
+        pageSize: results.pageSize,
+      }, app)) : 
+    res.json(results);
+}
+
+// Script: tsv
+const script_8c9cf40cbc204476963d23d969224a34 = async (event, app) => {
+  const resolveID = app.getScript('resolveID');
+  const shallowFields = app.getScript('shallowFields');
+  const shallow = app.getScript('shallow');
+  const tabelize = app.getScript('tabelize');
+  const tableStringify = app.getScript('tableStringify');
+
+  const fields = await shallowFields();
+  const shallows = await Promise.all(event.infos.map(nested => shallow({ nested, fields })));
+  const table = await tabelize({
+    shallows,
+    fields,
+    pageNumber: event.pageNumber,
+    pageSize: event.pageSize,
+  });
+
+  return tableStringify({ table, separator: '\t' });
+}
+
 // Script: tabelize
 const script_110622f3ccda4a8d965656861a1f082e = async (event) => {
+
+  const rowOffset = event.pageNumber && event.pageSize ?
+    (event.pageNumber - 1) * event.pageSize : 0;
 
   const hm = createHeaderMap(event.shallows);
   const nl = createdNestedHeaderList(event.fields, hm);
   const hl = flattenHeaderList(event.shallows, hm, nl);
-  return populateTableByHeaders(event.shallows, hl);
+  return populateTableByHeaders(event.shallows, hl, rowOffset);
 
   //
   // Create a map of all the keys that have at least one value
@@ -1075,9 +1104,6 @@ const script_110622f3ccda4a8d965656861a1f082e = async (event) => {
       target.push(...properties);
     }
 
-//RWK Proposal:
-//Add in special code to sort the funky Alt ID fields (grouping ID types together) -- you could create a temporary 
-//array of the Alt IDs actually in play and sort/group them, then use that to order the Alt ID fields.
 
     // SL: 
     function addAltIDHeaders() {
@@ -1206,10 +1232,10 @@ const script_110622f3ccda4a8d965656861a1f082e = async (event) => {
   // Create a table with the specified headers and each row representing
   // the data from one of the shallows.
   //
-  function populateTableByHeaders(shallows, headers) {
+  function populateTableByHeaders(shallows, headers, rowOffset = 0) {
     const table = [ headers ];
     for (let r = 0; r < event.shallows.length; r++) {
-      const rowId = r + 1;
+      const rowId = r + 1 + rowOffset;
       const sh = shallows[r];
       const row = headers.map(key => key === 'Row_ID' ? rowId : sh[key]);
       table.push(row);
@@ -1217,20 +1243,6 @@ const script_110622f3ccda4a8d965656861a1f082e = async (event) => {
     return table;
   }
 
-}
-
-// Script: tsv
-const script_8c9cf40cbc204476963d23d969224a34 = async (event, app) => {
-  const resolveID = app.getScript('resolveID');
-  const shallowFields = app.getScript('shallowFields');
-  const shallow = app.getScript('shallow');
-  const tabelize = app.getScript('tabelize');
-  const tableStringify = app.getScript('tableStringify');
-  const fields = await shallowFields();
-  const shallows = await Promise.all(event.infos.map(nested => shallow({ nested, fields })));
-  const table = await tabelize({ shallows, fields });
-
-  return tableStringify({ table, separator: '\t' });
 }
 
 // Script: shallow
@@ -1467,15 +1479,6 @@ const script_86b3e96c564d4b9da741ddb83ea10d2c = async (event, app) => {
 
 try {
 HttpConnector__API_bdde19de936d49c6a266aae83766cdf6 && HttpConnector__API_bdde19de936d49c6a266aae83766cdf6.on(
-{'path':'query', 'method':'POST'}
-, script_1fe9472b38044f93acc1361e0ff8f4f4, 'dbd41091-23c8-400a-b60d-2ee0a5948e96')
-
-}
-catch (err) {
-app.getLogger().error('Runtime Http event creation error. Review configuration for event Query', err)
-}
-try {
-HttpConnector__API_bdde19de936d49c6a266aae83766cdf6 && HttpConnector__API_bdde19de936d49c6a266aae83766cdf6.on(
 {'method':'GET', 'path':'resolve/:prefix/:suffix'}
 , script_187674a836264ead89ef32dfd1f8c173, 'ddab991f-9083-45be-918a-5fbdc395fc90')
 
@@ -1503,6 +1506,15 @@ app.getLogger().error('Runtime Http event creation error. Review configuration f
 }
 try {
 HttpConnector__API_bdde19de936d49c6a266aae83766cdf6 && HttpConnector__API_bdde19de936d49c6a266aae83766cdf6.on(
+{'path':'query', 'method':'POST'}
+, script_1fe9472b38044f93acc1361e0ff8f4f4, 'dbd41091-23c8-400a-b60d-2ee0a5948e96')
+
+}
+catch (err) {
+app.getLogger().error('Runtime Http event creation error. Review configuration for event Query', err)
+}
+try {
+HttpConnector__API_bdde19de936d49c6a266aae83766cdf6 && HttpConnector__API_bdde19de936d49c6a266aae83766cdf6.on(
 {'method':'GET', 'path':'--health'}
 , script_bfd0b9b74ce444de86575c84d2a6b55b, '9bb3aa24-5caf-4748-a9bd-63f53dbd85cc')
 
@@ -1522,7 +1534,6 @@ app.getLogger().error('Runtime Http event creation error. Review configuration f
 
 /** Handler registrations **/
 
-app.registerHandler(script_1fe9472b38044f93acc1361e0ff8f4f4, '1fe9472b-3804-4f93-acc1-361e0ff8f4f4', 'Query')
 app.registerHandler(script_d341c1cf401f447388c965f4d896e4fe, 'd341c1cf-401f-4473-88c9-65f4d896e4fe', 'getValidatedTypes')
 app.registerHandler(script_187674a836264ead89ef32dfd1f8c173, '187674a8-3626-4ead-89ef-32dfd1f8c173', 'ResolveOneID')
 app.registerHandler(script_44499d1f9508432486f1f4bfa66f15c9, '44499d1f-9508-4324-86f1-f4bfa66f15c9', 'validateID')
@@ -1538,8 +1549,9 @@ app.registerHandler(script_7593e0bc639f4ef783900dd0495ad7ef, '7593e0bc-639f-4ef7
 app.registerHandler(script_9c49905643254b15a4f5644fb1abb6d6, '9c499056-4325-4b15-a4f5-644fb1abb6d6', 'checkQueryLimits')
 app.registerHandler(script_5f69cad3062747cc9c19362d420b4648, '5f69cad3-0627-47cc-9c19-362d420b4648', 'sortResults')
 app.registerHandler(script_c0e2c37b707441ddbb0ef94f16bb3e88, 'c0e2c37b-7074-41dd-bb0e-f94f16bb3e88', 'shallowFields')
-app.registerHandler(script_110622f3ccda4a8d965656861a1f082e, '110622f3-ccda-4a8d-9656-56861a1f082e', 'tabelize')
+app.registerHandler(script_1fe9472b38044f93acc1361e0ff8f4f4, '1fe9472b-3804-4f93-acc1-361e0ff8f4f4', 'Query')
 app.registerHandler(script_8c9cf40cbc204476963d23d969224a34, '8c9cf40c-bc20-4476-963d-23d969224a34', 'tsv')
+app.registerHandler(script_110622f3ccda4a8d965656861a1f082e, '110622f3-ccda-4a8d-9656-56861a1f082e', 'tabelize')
 app.registerHandler(script_0f3d9ccd2de440d98c827c2b3f5ddd8b, '0f3d9ccd-2de4-40d9-8c82-7c2b3f5ddd8b', 'shallow')
 app.registerHandler(script_bfd0b9b74ce444de86575c84d2a6b55b, 'bfd0b9b7-4ce4-44de-8657-5c84d2a6b55b', '__Health')
 app.registerHandler(script_732731b8b1fa4a069e751d8f9576a939, '732731b8-b1fa-4a06-9e75-1d8f9576a939', 'sorter')
