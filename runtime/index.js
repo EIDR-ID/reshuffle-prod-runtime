@@ -1,19 +1,9 @@
-const { HttpConnector } = require('reshuffle')
 const { EIDRConnector } = require('reshuffle-eidr-connector')
+const { HttpConnector } = require('reshuffle')
 const { ReshuffleEnterprise } = require('reshuffle-runtime-enterprise')
 const app = new ReshuffleEnterprise()
 
 /** Connector definitions **/
-
-// Connector: API
-let HttpConnector__API_bdde19de936d49c6a266aae83766cdf6
-try {
-HttpConnector__API_bdde19de936d49c6a266aae83766cdf6 = new HttpConnector(app, {'authKey':'', 'authScript':''}, 'API')
-
-}
-catch (err) {
-app.getLogger().error('Runtime HttpConnector instantiation error. Review configuration for connector API', err)
-}
 
 // Connector: eidr
 let EIDRConnector__eidr_7693dac6e776496daf33cc15eb77768c
@@ -25,7 +15,46 @@ catch (err) {
 app.getLogger().error('Runtime EIDRConnector instantiation error. Review configuration for connector eidr', err)
 }
 
+// Connector: API
+let HttpConnector__API_bdde19de936d49c6a266aae83766cdf6
+try {
+HttpConnector__API_bdde19de936d49c6a266aae83766cdf6 = new HttpConnector(app, {'authKey':'', 'authScript':''}, 'API')
+
+}
+catch (err) {
+app.getLogger().error('Runtime HttpConnector instantiation error. Review configuration for connector API', err)
+}
+
 /** Scripts definitions **/
+
+// Script: checkQueryLimits
+const script_9c49905643254b15a4f5644fb1abb6d6 = async (app, size, type, idOnly) => {
+  // assumes one of the legal resoltion types
+  // the caller is repsonsible for checking
+  console.log("checkQueryLimits")
+  console.log(size);
+  console.log(type);
+  console.log(idOnly)
+  const getSysInfo = app.getScript('getSysInfo');
+  const sysinfo = await getSysInfo(app);
+
+  if (idOnly){
+    //console.log("idonly")
+    return (size <= sysinfo.limits.idOnly )
+  }
+  else if (type.toLowerCase() === 'simple') {
+    //console.log(sysinfo)
+    return (size <= sysinfo.limits.simple)
+  }
+  else{
+    // one of the other types
+    //console.log("other")
+    return (size <= sysinfo.limits.other)
+  }
+  
+}
+
+
 
 // Script: getValidatedTypes
 const script_d341c1cf401f447388c965f4d896e4fe = // Get validated type information from an HTTP request.
@@ -174,66 +203,6 @@ async ({ req }) => {
   }
 }
 
-// Script: ResolveOneID
-const script_187674a836264ead89ef32dfd1f8c173 = //
-// Resolve one EIDR resource ID.
-//
-// Request path should include a single an EIDR ID as described
-// in "validateID".
-//
-// Response body is a JSON encoded object with the information
-// about the identified media resource.
-//
-async (event, app) => {
-  const { req, res } = event;
-
-  const validateID = app.getScript('validateID');
-  const getValidatedTypes = app.getScript('getValidatedTypes');
-  const buildRedirectResponse = app.getScript('buildRedirectResponse');
-  const resolveID = app.getScript('resolveID');
-  const tsv = app.getScript('tsv');
-
-  const suffix = req.params.suffix;
-  const prefix = req.params.prefix;
-//  console.log(`${prefix}/${suffix}`)
-
-  const id = `${prefix}/${suffix}`
-  if (!await validateID({ id })) {
-    return res.status(400).send(`Invalid ID: ${prefix}/${suffix}`);
-  }
-
-  const types = await getValidatedTypes({ req });
-  if (types instanceof Error) {
-    return res.status(400).send(types.message);
-  }
-  /*
-  if (types.format === 'tsv') {
-    return new Error('TSV not supported for single ID resolution');
-  }
-  */
-
-  if (types.redirect) {
-    return buildRedirectResponse({ req, res, id, types });
-  }
-
-  try {
-    const info = await resolveID({ id, types });
-    //return res.status(200).json(info);
-    return types.format === 'tsv' ? 
-      res.set({'Content-Type': 'text/tab-separated-values'}).send(await tsv({infos:[info]}, app)) : 
-      res.json(info);
-  } catch (e) {
-    if (typeof e.status === 'number') {
-      return res.status(e.status).json({
-        error: e.message,
-        details: e.details,
-      });
-    } else {
-      throw e;
-    }
-  }
-}
-
 // Script: validateID
 const script_44499d1f9508432486f1f4bfa66f15c9 = // Validate an EIDR content or other ID with the
 // following formats:
@@ -257,20 +226,31 @@ async ({ id }) => {
 
 // Script: getSysInfo
 const script_edb4ad96d7a2417aa916579ecf0585a1 = async (app) => {
-  
+  const eidr = app.getConnector('eidr');
+  const deps = require(`${__dirname}/../package.json`).dependencies;
+
   const limits = {
     idOnly:200000,
     simple: 70000,
     other: 5000
   }
-  
+
   const versions= {
-    eidr: "2.6.0",
-    reshuffle: "xxx",
-    connector: "yyy",
-    scripts: "zzz"
-  }
-  return {limits, versions}
+    ...eidr.info(),
+    ...deps,
+    scripts: 'unknown',
+  };
+
+  return { limits, versions };
+}
+
+// Script: Info
+const script_c63ded14d69d46f2be3580530e41603c = async (event, app) => {
+  const { req, res } = event;
+  res.set({'eidr-version': app.getConnector('eidr').info().eidrApiVersion});
+  const getSysInfo = app.getScript('getSysInfo');
+  const info = await getSysInfo(app);
+  return res.json(info);
 }
 
 // Script: tableParse
@@ -317,31 +297,6 @@ async ({ req, res, id, types }) => {
   return res.redirect(302, `https://doi.org/${id}${locatt}`);
 }
 
-// Script: Info
-const script_c63ded14d69d46f2be3580530e41603c = async (event, app) => {
-  const { req, res } = event;
-  const getSysInfo = app.getScript('getSysInfo');
-  const info = await getSysInfo(app);
-  return (res.json(info))
-}
-
-// Script: resolveID
-const script_c85e6c85f0e4480fb31b07e7f2ea53bc = //
-// @param id        EIDR ID
-//
-// @param types     Validated types structure as returned
-//                  by getValidatedTypes
-//
-// @return EIDR info for the ID
-//
-async ({ id, types }) => {
-  app.getConnector('eidr');
-  const eidr = app.getConnector('eidr');
-  const normalize = app.getScript('normalize');
-  const info = await eidr.resolve(id, types.mixed || 'Full');
-  return normalize({ info });
-}
-
 // Script: queryHelper
 const script_d687e6f96b0c4c23818d2dd7b2b0f43c = // decides what kind of query to do (XML or JSON-based)
 // calls the connector
@@ -353,17 +308,19 @@ async (event, app) => {
   const { req, res } = event;
   const validateID = app.getScript('validateID');
   const getValidatedTypes = app.getScript('getValidatedTypes');
+  const getDefaultType = app.getScript('getDefaultType');
   const buildRedirectResponse = app.getScript('buildRedirectResponse');
   const resolveID = app.getScript('resolveID');
   const eidr =  app.getConnector('eidr');
   const normalize = app.getScript('normalize');
   const checkQueryLimits = app.getScript('checkQueryLimits');
   const bbPromise = require ('bluebird');
-  
-  const contentType = event.req.headers['content-type']
+
+  const contentType = event.req.headers['content-type'];
   //console.log(contentType)
   
-  let body
+  const authorization = event.req.header('Authorization');
+  let body;
   if (contentType === 'application/json') {
     body = event.req.body
   } else if (contentType === 'text/plain' || contentType === 'text/xml') {
@@ -384,10 +341,17 @@ async (event, app) => {
   }
   //console.log(body)
 
-  const types = await getValidatedTypes({ req });
+  let types = await getValidatedTypes({ req });
   if (types instanceof Error) {
     console.log("types were an error")
     return res.status(400).send(types.message);
+  }
+  if (types.type === undefined) {
+    //console.log(types);
+    // if nothing's there. use a default
+    //console.log('Resolution type not defined')
+    types = await getDefaultType();
+    //console.log(types)
   }
 
   if (types.redirect) {
@@ -395,6 +359,9 @@ async (event, app) => {
   }
   let idOnly = req.query.idOnly;
   //console.log(idOnly);
+  
+  let root = req.query.root;
+  //console.log(root);
   
   const DEFAULTPAGESIZE = 2500;
   let pageNumber;
@@ -431,16 +398,18 @@ async (event, app) => {
 
   try {
     if (pageSize != 0) {
-      //console.log("pagesize != 0")
+      // console.log("pagesize != 0")
       const psOK = await checkQueryLimits(app, pageSize, types.type, idOnly)
-      //console.log(psOK);
+      // console.log(psOK);
       if (!psOK){
         const bad = idOnly ? 'idOnly' : types.type;
         return event.res.status(400).send(`pageSize ${pageSize} too large for type ${bad}`)
       }
-      results = await eidr.query(body, 
-                                 { idOnly: idOnly || types.type !=='simple', 
-                                   pageNumber, pageSize });
+      results = await eidr.query(
+        body, 
+        { idOnly: idOnly || types.type !=='simple', pageNumber, pageSize, root },
+        authorization,
+      );
       results.pageSize = pageSize;
       results.pageNumber = pageNumber;
       results.currentSize = results.results.length;
@@ -455,7 +424,11 @@ async (event, app) => {
       let intermediate;
       pageSize = DEFAULTPAGESIZE;
       pageNumber = 1;
-      intermediate = await eidr.query(body, { idOnly: idOnly || types.type!== 'simple', pageNumber, pageSize });
+      intermediate = await eidr.query(
+        body,
+        { idOnly: idOnly || types.type!== 'simple', pageNumber, pageSize, root },
+        authorization,
+      );
       const expected = intermediate.totalMatches;
       const fullOK = await checkQueryLimits(app, expected, types.type, idOnly)
       //console.log(fullOK)
@@ -469,7 +442,11 @@ async (event, app) => {
       while(cumulative.length < expected) {
         console.log(`cumulative length: ${cumulative.length}`)
         pageNumber++;
-        intermediate = await eidr.query(body, { idOnly: idOnly || types.type !== 'simple', pageNumber, pageSize });
+        intermediate = await eidr.query(
+          body,
+          { idOnly: idOnly || types.type !== 'simple', pageNumber, pageSize, root },
+          authorization,
+        );
         // XXX whcih is better?
        // cumulative = [...cumulative, ...intermediate.results]
         cumulative=cumulative.concat(intermediate.results)
@@ -521,6 +498,23 @@ async (event, app) => {
   //console.log("----")
   //console.log(results);
   return { results, types };
+}
+
+// Script: resolveID
+const script_c85e6c85f0e4480fb31b07e7f2ea53bc = //
+// @param id        EIDR ID
+//
+// @param types     Validated types structure as returned
+//                  by getValidatedTypes
+//
+// @return EIDR info for the ID
+//
+async ({ id, types }) => {
+  app.getConnector('eidr');
+  const eidr = app.getConnector('eidr');
+  const normalize = app.getScript('normalize');
+  const info = await eidr.resolve(id, types.mixed || 'Full');
+  return normalize({ info });
 }
 
 // Script: tableStringify
@@ -669,35 +663,6 @@ async ({ info }) => {
   }
 }
 
-// Script: checkQueryLimits
-const script_9c49905643254b15a4f5644fb1abb6d6 = async (app, size, type, idOnly) => {
-  // assumes one of the legal resoltion types
-  // the caller is repsonsible for checking
-  console.log("checkQueryLimits")
-  console.log(size);
-  console.log(type);
-  console.log(idOnly)
-  const getSysInfo = app.getScript('getSysInfo');
-  const sysinfo = await getSysInfo();
-
-  if (idOnly){
-    console.log("idonly")
-    return (size <= sysinfo.limits.idOnly )
-  }
-  else if (type.toLowerCase() === 'simple') {
-    console.log(sysinfo)
-    return (size <= sysinfo.limits.simple)
-  }
-  else{
-    // one of the other types
-    console.log("other")
-    return (size <= sysinfo.limits.other)
-  }
-  
-}
-
-
-
 // Script: sortResults
 const script_5f69cad3062747cc9c19362d420b4648 = async (app, records, sort, order) => {
     const sorter = app.getScript('sorter');
@@ -707,43 +672,6 @@ const script_5f69cad3062747cc9c19362d420b4648 = async (app, records, sort, order
       return sorted
     }
     return records;
-}
-
-// Script: Query
-const script_1fe9472b38044f93acc1361e0ff8f4f4 = async (event, app) => {
-  const { req, res } = event;
-  console.log('Query POST')
-  const tsv = app.getScript('tsv');
-  const queryHelper = app.getScript('queryHelper');
-  const sortResults = app.getScript('sortResults');
-
-  let { results, types } = await queryHelper(event, app)
-  if (!results) {
-    return
-  }
-
-console.log("queryHelper got results")
-  if (req.query && req.query.sort){ 
-    const sorted = await sortResults(app, results.results, req.query.sort, req.query.order)
-    results.results = sorted;
-  }
-
-  console.log("query sorting done")
-  
-  if (results.idOnly && types.format === "tsv") {
-    const list =["EIDR_ID"].concat(results.results)
-    return(res.send(list.join("\n")))
-  }
-  
-  return types.format === 'tsv' ? 
-    res
-      .set({'Content-Type': 'text/tab-separated-values'})
-      .send(await tsv({
-        infos: results.results,
-        pageNumber: results.pageNumber,
-        pageSize: results.pageSize,
-      }, app)) : 
-    res.json(results);
 }
 
 // Script: shallowFields
@@ -989,65 +917,6 @@ const script_8c9cf40cbc204476963d23d969224a34 = async (event, app) => {
   return tableStringify({ table, separator: '\t' });
 }
 
-// Script: ResolveMultipleIDs
-const script_b80a6646a6df41179c63d113b96572ab = //
-// Resolve multiple EIDR resource ID.
-//
-// Request body should be a JSON object with a single property
-// names 'ids' whose value is a list of EIDR ID strings as
-// described in "validateID".
-//
-// Response body is a JSON encoded object with the information
-// about the identified media resource.
-//
-async (event, app) => {
-  const { req, res } = event;
-//console.log('resolve multiple');
-  const validateID = app.getScript('validateID');
-  const getValidatedTypes = app.getScript('getValidatedTypes');
-  const buildRedirectResponse = app.getScript('buildRedirectResponse');
-  const resolveID = app.getScript('resolveID');
-  const tsv = app.getScript('tsv');
-  const ids = req.body.ids;
-//console.log(ids);
-  if (!Array.isArray(ids)) {
-    return res.status(400).send(`Invalid 'ids' array is request body`);
-  }
-  for (const id of ids) {
-    if (!await validateID({ id })) {
-      return res.status(400).send(`Invalid ID: ${id}`);
-    }
-  }
-  console.log('validated')
-
-  const types = await getValidatedTypes({ req });
-  if (types instanceof Error) {
-    return res.status(400).send(types.message);
-  }
-
-  if (types.redirect) {
-    return res.status(400).send('XML Redirect not supported');
-  }
-
-  try {
-    const infos = await Promise.all(
-      ids.map(id => resolveID({ id, types }))
-    );
-    return types.format === 'tsv' ? 
-      res.set({'Content-Type': 'text/tab-separated-values'}).send(await tsv({infos}, app)) : 
-      res.json(infos);
-  } catch (e) {
-    if (typeof e.status === 'number') {
-      return res.status(e.status).json({
-        error: e.message,
-        details: e.details,
-      });
-    } else {
-      throw e;
-    }
-  }
-}
-
 // Script: tabelize
 const script_110622f3ccda4a8d965656861a1f082e = async (event) => {
 
@@ -1253,6 +1122,68 @@ const script_110622f3ccda4a8d965656861a1f082e = async (event) => {
 
 }
 
+// Script: Query
+const script_1fe9472b38044f93acc1361e0ff8f4f4 = async (event, app) => {
+  const { req, res } = event;
+
+  const logRequestStats = app.getScript('logRequestStats');
+  function logStats(params) {
+    return logRequestStats({
+      req,
+      params: { type: 'Query', ...params },
+    });
+  }
+
+  console.log('Query POST')
+  const tsv = app.getScript('tsv');
+  const queryHelper = app.getScript('queryHelper');
+  const sortResults = app.getScript('sortResults');
+  res.set({ 'eidr-version': app.getConnector('eidr').info().eidrApiVersion });
+
+  try {
+    let { results, types } = await queryHelper(event, app);
+    if (!results) {
+      await logStats({ statusCode: 500, errorMessage: 'queryHelper error' });
+      return
+    }
+    console.log("queryHelper got results");
+
+    await logStats({ statusCode: 200 });
+
+    if (req.query && req.query.sort){ 
+      const sorted = await sortResults(app, results.results, req.query.sort, req.query.order)
+      results.results = sorted;
+    }
+    console.log("query sorting done")
+  
+    if (results.idOnly && types.format === "tsv") {
+      const list =["EIDR_ID"].concat(results.results)
+      return res.send(list.join("\n"))
+    }
+  
+    return types.format === 'tsv' ? 
+      res
+        .set({'Content-Type': 'text/tab-separated-values'})
+        .send(await tsv({
+          infos: results.results,
+          pageNumber: results.pageNumber,
+          pageSize: results.pageSize,
+        }, app)) : 
+      res.json(results);
+
+  } catch (e) {
+    if (e.message.startsWith('EIDRConnector')) {
+      console.error(e);
+      await logStats({ statusCode: e.status, errorMessage: e.details });
+      return event.res.status(e.status).send(e.details);
+    } else {
+      console.error(e);
+      await logStats({ statusCode: 500, errorMessage: 'Connector error' });
+      return event.res.status(500).send('Connector error');
+    }
+  }
+}
+
 // Script: shallow
 const script_0f3d9ccd2de440d98c827c2b3f5ddd8b = //
 // Convert EIDR resource info into shallow (un-nested) object.
@@ -1273,7 +1204,7 @@ async (event) => {
   }
   return shallow;
   
-  //Special handling for Alt ID column consolidation and alphabetical sorting
+  // Special handling for Alt ID column consolidation and alphabetical sorting
   function flattenAltID(tgt, altIDList) {
     currentItemCount = {};
     
@@ -1283,6 +1214,11 @@ async (event) => {
         } else {
           currentItemCount[name] = 1;
         }
+        
+        // 01/01/2021 Added type
+        tgt['AlternateID_' + name + '-' + currentItemCount[name] + '@type'] = src._type === 'Proprietary'? src._type : name;
+        // 01/01/2021 End
+        
         tgt['AlternateID_' + name + '-' + currentItemCount[name]] = src.value;
         if(src._relation) {
           tgt['AlternateID_' + name + '-' + currentItemCount[name] + '@relation'] = src._relation;
@@ -1291,7 +1227,7 @@ async (event) => {
     
     altIDList.forEach((src, i) => {
       if(src._type === 'Proprietary') {
-        createAltIDProp(src._domain, src);
+        createAltIDProp(src._domain, src, true);
       } else {
         createAltIDProp(src._type, src);
       }
@@ -1392,9 +1328,130 @@ async (event) => {
 }
 
 
-// Script: __Health
-const script_bfd0b9b74ce444de86575c84d2a6b55b = async (event, app) => {
-  event.res.send();
+// Script: getDefaultType
+const script_ac71ffd8a9e146bdaed7f227e7facc18 = // Get a default resolution type
+//
+// @param none
+//
+// @return return an object with the following fields
+//           type: 'Full'
+//           format: 'json'
+//           redirect: false
+//           mixed: 'Full'
+//           lower: 'full'
+//
+async () => {
+  const defaultType = {
+    type: 'Full',
+    format: 'json',
+    redirect: false,
+    mixed: 'Full',
+    lower: 'full'
+  }
+  return defaultType;
+}
+
+// Script: logRequestStats
+const script_8b9d42f29da045339f53d832823d9ecb = async (event, app) => {
+  const AWS = require('aws-sdk');
+  const elasticsearch = require('@elastic/elasticsearch');
+  const createAwsElasticsearchConnector = require('aws-elasticsearch-connector');
+
+  AWS.config.update({
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    region: process.env.AWS_REGION,
+  });
+
+  const client = new elasticsearch.Client({
+    ...createAwsElasticsearchConnector(AWS.config),
+    node: process.env.ELASTICSEARCH_NODE_URL,
+  });
+
+  client.index({
+    index: process.env.ELASTICSEARCH_INDEX_NAME,
+    type: 'doc',
+    body: {
+      name: 'request',
+      when: (new Date()).toISOString(),
+      ip: event.req.headers['x-forwarded-for'] || event.req.connection.remoteAddress,
+      ...(event.params || {}),
+    },
+  });
+}
+
+// Script: ResolveOneID
+const script_187674a836264ead89ef32dfd1f8c173 = //
+// Resolve one EIDR resource ID.
+//
+// Request path should include a single an EIDR ID as described
+// in "validateID".
+//
+// Response body is a JSON encoded object with the information
+// about the identified media resource.
+//
+async (event, app) => {
+  const { req, res } = event;
+
+  const logRequestStats = app.getScript('logRequestStats');
+  function logStats(params) {
+    return logRequestStats({
+      req,
+      params: { type: 'ResolveOneID', ...params },
+    });
+  }
+
+  const validateID = app.getScript('validateID');
+  const getValidatedTypes = app.getScript('getValidatedTypes');
+  const buildRedirectResponse = app.getScript('buildRedirectResponse');
+  const resolveID = app.getScript('resolveID');
+  const tsv = app.getScript('tsv');
+  res.set({'eidr-version': app.getConnector('eidr').info().eidrApiVersion});
+
+  const suffix = req.params.suffix;
+  const prefix = req.params.prefix;
+//  console.log(`${prefix}/${suffix}`)
+
+  const id = `${prefix}/${suffix}`
+  if (!await validateID({ id })) {
+    const errorMessage = `Invalid ID: ${prefix}/${suffix}`;
+    await logStats({ statusCode: 400, errorMessage });
+    return res.status(400).send(errorMessage);
+  }
+
+  const types = await getValidatedTypes({ req });
+  if (types instanceof Error) {
+    await logStats({ statusCode: 400, errorMessage: types.message });
+    return res.status(400).send(types.message);
+  }
+  /*
+  if (types.format === 'tsv') {
+    return new Error('TSV not supported for single ID resolution');
+  }
+  */
+
+  if (types.redirect) {
+    return buildRedirectResponse({ req, res, id, types });
+  }
+
+  try {
+    const info = await resolveID({ id, types });
+    await logStats({ statusCode: 200 });
+    return types.format === 'tsv' ? 
+      res.set({'Content-Type': 'text/tab-separated-values'}).send(await tsv({infos:[info]}, app)) : 
+      res.json(info);
+  } 
+  catch (e) {
+    if (e.message.startsWith('EIDRConnector')) {
+      console.error(e);
+      await logStats({ statusCode: e.status, errorMessage: e.details });
+      return event.res.status(e.status).send(e.details);
+    } else {
+      console.error(e);
+      await logStats({ statusCode: 500, errorMessage: 'Connector error' });
+      return event.res.status(500).send('Connector error');
+    }
+  }
 }
 
 // Script: sorter
@@ -1490,23 +1547,88 @@ async (sort, order = 'asc') =>{
 }
 
 
-// Script: __Version
-const script_86b3e96c564d4b9da741ddb83ea10d2c = async (event, app) => {
-  const deps = require(`${__dirname}/../package.json`).dependencies
-  event.res.json(deps)
+// Script: ResolveMultipleIDs
+const script_b80a6646a6df41179c63d113b96572ab = //
+// Resolve multiple EIDR resource ID.
+//
+// Request body should be a JSON object with a single property
+// names 'ids' whose value is a list of EIDR ID strings as
+// described in "validateID".
+//
+// Response body is a JSON encoded object with the information
+// about the identified media resource.
+//
+async (event, app) => {
+  const { req, res } = event;
+
+  const logRequestStats = app.getScript('logRequestStats');
+  function logStats(params) {
+    return logRequestStats({
+      req,
+      params: { type: 'ResolveMultipleID', ...params },
+    });
+  }
+
+//console.log('resolve multiple');
+  const validateID = app.getScript('validateID');
+  const getValidatedTypes = app.getScript('getValidatedTypes');
+  const buildRedirectResponse = app.getScript('buildRedirectResponse');
+  const resolveID = app.getScript('resolveID');
+  const tsv = app.getScript('tsv');
+  const ids = req.body.ids;
+  res.set({'eidr-version': app.getConnector('eidr').info().eidrApiVersion});
+
+//console.log(ids);
+  if (!Array.isArray(ids)) {
+    const errorMessage = `Invalid 'ids' array is request body`;
+    await logStats({ statusCode: 400, errorMessage });
+    return res.status(400).send(errorMessage);
+  }
+  for (const id of ids) {
+    if (!await validateID({ id })) {
+      const errorMessage = `Invalid ID: ${id}`;
+      await logStats({ statusCode: 400, errorMessage });
+      return res.status(400).send(errorMessage);
+    }
+  }
+  console.log('validated')
+
+  const types = await getValidatedTypes({ req });
+  if (types instanceof Error) {
+    await logStats({ statusCode: 400, errorMessage: types.message });
+    return res.status(400).send(types.message);
+  }
+
+  if (types.redirect) {
+    const errorMessage = 'XML Redirect not supported';
+    await logStats({ statusCode: 400, errorMessage });
+    return res.status(400).send(errorMessage);
+  }
+
+  try {
+    const infos = await Promise.all(
+      ids.map(id => resolveID({ id, types }))
+    );
+    await logStats({ statusCode: 200 });
+    return types.format === 'tsv' ? 
+      res.set({'Content-Type': 'text/tab-separated-values'}).send(await tsv({infos}, app)) : 
+      res.json(infos);
+  } 
+  catch (e) {
+    if (e.message.startsWith('EIDRConnector')) {
+      console.log(e);
+      await logStats({ statusCode: e.status, errorMessage: e.details });
+      return event.res.status(e.status).send(e.details);
+    } else {
+        console.error(e);
+        await logStats({ statusCode: 500, errorMessage: 'Connector error' });
+        return event.res.status(500).send('Connector error');
+    }
+  }
 }
 
 /** Event handling definitions **/
 
-try {
-HttpConnector__API_bdde19de936d49c6a266aae83766cdf6 && HttpConnector__API_bdde19de936d49c6a266aae83766cdf6.on(
-{'method':'GET', 'path':'resolve/:prefix/:suffix'}
-, script_187674a836264ead89ef32dfd1f8c173, 'ddab991f-9083-45be-918a-5fbdc395fc90')
-
-}
-catch (err) {
-app.getLogger().error('Runtime Http event creation error. Review configuration for event Resolve One ID', err)
-}
 try {
 HttpConnector__API_bdde19de936d49c6a266aae83766cdf6 && HttpConnector__API_bdde19de936d49c6a266aae83766cdf6.on(
 {'method':'GET', 'path':'info'}
@@ -1527,6 +1649,15 @@ app.getLogger().error('Runtime Http event creation error. Review configuration f
 }
 try {
 HttpConnector__API_bdde19de936d49c6a266aae83766cdf6 && HttpConnector__API_bdde19de936d49c6a266aae83766cdf6.on(
+{'method':'GET', 'path':'resolve/:prefix/:suffix'}
+, script_187674a836264ead89ef32dfd1f8c173, 'ddab991f-9083-45be-918a-5fbdc395fc90')
+
+}
+catch (err) {
+app.getLogger().error('Runtime Http event creation error. Review configuration for event Resolve One ID', err)
+}
+try {
+HttpConnector__API_bdde19de936d49c6a266aae83766cdf6 && HttpConnector__API_bdde19de936d49c6a266aae83766cdf6.on(
 {'method':'POST', 'path':'resolve'}
 , script_b80a6646a6df41179c63d113b96572ab, 'b6e1ebf6-5365-472a-9d4b-e79fba969af6')
 
@@ -1534,47 +1665,29 @@ HttpConnector__API_bdde19de936d49c6a266aae83766cdf6 && HttpConnector__API_bdde19
 catch (err) {
 app.getLogger().error('Runtime Http event creation error. Review configuration for event Resolve Multiple IDs', err)
 }
-try {
-HttpConnector__API_bdde19de936d49c6a266aae83766cdf6 && HttpConnector__API_bdde19de936d49c6a266aae83766cdf6.on(
-{'method':'GET', 'path':'--health'}
-, script_bfd0b9b74ce444de86575c84d2a6b55b, '9bb3aa24-5caf-4748-a9bd-63f53dbd85cc')
-
-}
-catch (err) {
-app.getLogger().error('Runtime Http event creation error. Review configuration for event --health', err)
-}
-try {
-HttpConnector__API_bdde19de936d49c6a266aae83766cdf6 && HttpConnector__API_bdde19de936d49c6a266aae83766cdf6.on(
-{'method':'GET', 'path':'--version'}
-, script_86b3e96c564d4b9da741ddb83ea10d2c, '5607cfce-6f74-4ab4-b01c-b5d0eb2245d8')
-
-}
-catch (err) {
-app.getLogger().error('Runtime Http event creation error. Review configuration for event --version', err)
-}
 
 /** Handler registrations **/
 
+app.registerHandler(script_9c49905643254b15a4f5644fb1abb6d6, '9c499056-4325-4b15-a4f5-644fb1abb6d6', 'checkQueryLimits')
 app.registerHandler(script_d341c1cf401f447388c965f4d896e4fe, 'd341c1cf-401f-4473-88c9-65f4d896e4fe', 'getValidatedTypes')
-app.registerHandler(script_187674a836264ead89ef32dfd1f8c173, '187674a8-3626-4ead-89ef-32dfd1f8c173', 'ResolveOneID')
 app.registerHandler(script_44499d1f9508432486f1f4bfa66f15c9, '44499d1f-9508-4324-86f1-f4bfa66f15c9', 'validateID')
 app.registerHandler(script_edb4ad96d7a2417aa916579ecf0585a1, 'edb4ad96-d7a2-417a-a916-579ecf0585a1', 'getSysInfo')
+app.registerHandler(script_c63ded14d69d46f2be3580530e41603c, 'c63ded14-d69d-46f2-be35-80530e41603c', 'Info')
 app.registerHandler(script_2bcfef5c29d34e08a6a37df2ee44d742, '2bcfef5c-29d3-4e08-a6a3-7df2ee44d742', 'tableParse')
 app.registerHandler(script_aaa3721960684a729189ae235c222ca7, 'aaa37219-6068-4a72-9189-ae235c222ca7', 'buildRedirectResponse')
-app.registerHandler(script_c63ded14d69d46f2be3580530e41603c, 'c63ded14-d69d-46f2-be35-80530e41603c', 'Info')
-app.registerHandler(script_c85e6c85f0e4480fb31b07e7f2ea53bc, 'c85e6c85-f0e4-480f-b31b-07e7f2ea53bc', 'resolveID')
 app.registerHandler(script_d687e6f96b0c4c23818d2dd7b2b0f43c, 'd687e6f9-6b0c-4c23-818d-2dd7b2b0f43c', 'queryHelper')
+app.registerHandler(script_c85e6c85f0e4480fb31b07e7f2ea53bc, 'c85e6c85-f0e4-480f-b31b-07e7f2ea53bc', 'resolveID')
 app.registerHandler(script_108dfe6c53a947e3a6e050aa57660c2c, '108dfe6c-53a9-47e3-a6e0-50aa57660c2c', 'tableStringify')
 app.registerHandler(script_7593e0bc639f4ef783900dd0495ad7ef, '7593e0bc-639f-4ef7-8390-0dd0495ad7ef', 'normalize')
-app.registerHandler(script_9c49905643254b15a4f5644fb1abb6d6, '9c499056-4325-4b15-a4f5-644fb1abb6d6', 'checkQueryLimits')
 app.registerHandler(script_5f69cad3062747cc9c19362d420b4648, '5f69cad3-0627-47cc-9c19-362d420b4648', 'sortResults')
-app.registerHandler(script_1fe9472b38044f93acc1361e0ff8f4f4, '1fe9472b-3804-4f93-acc1-361e0ff8f4f4', 'Query')
 app.registerHandler(script_c0e2c37b707441ddbb0ef94f16bb3e88, 'c0e2c37b-7074-41dd-bb0e-f94f16bb3e88', 'shallowFields')
 app.registerHandler(script_8c9cf40cbc204476963d23d969224a34, '8c9cf40c-bc20-4476-963d-23d969224a34', 'tsv')
-app.registerHandler(script_b80a6646a6df41179c63d113b96572ab, 'b80a6646-a6df-4117-9c63-d113b96572ab', 'ResolveMultipleIDs')
 app.registerHandler(script_110622f3ccda4a8d965656861a1f082e, '110622f3-ccda-4a8d-9656-56861a1f082e', 'tabelize')
+app.registerHandler(script_1fe9472b38044f93acc1361e0ff8f4f4, '1fe9472b-3804-4f93-acc1-361e0ff8f4f4', 'Query')
 app.registerHandler(script_0f3d9ccd2de440d98c827c2b3f5ddd8b, '0f3d9ccd-2de4-40d9-8c82-7c2b3f5ddd8b', 'shallow')
-app.registerHandler(script_bfd0b9b74ce444de86575c84d2a6b55b, 'bfd0b9b7-4ce4-44de-8657-5c84d2a6b55b', '__Health')
+app.registerHandler(script_ac71ffd8a9e146bdaed7f227e7facc18, 'ac71ffd8-a9e1-46bd-aed7-f227e7facc18', 'getDefaultType')
+app.registerHandler(script_8b9d42f29da045339f53d832823d9ecb, '8b9d42f2-9da0-4533-9f53-d832823d9ecb', 'logRequestStats')
+app.registerHandler(script_187674a836264ead89ef32dfd1f8c173, '187674a8-3626-4ead-89ef-32dfd1f8c173', 'ResolveOneID')
 app.registerHandler(script_732731b8b1fa4a069e751d8f9576a939, '732731b8-b1fa-4a06-9e75-1d8f9576a939', 'sorter')
-app.registerHandler(script_86b3e96c564d4b9da741ddb83ea10d2c, '86b3e96c-564d-4b9d-a741-ddb83ea10d2c', '__Version')
+app.registerHandler(script_b80a6646a6df41179c63d113b96572ab, 'b80a6646-a6df-4117-9c63-d113b96572ab', 'ResolveMultipleIDs')
 app.start()
