@@ -1328,6 +1328,59 @@ async (event) => {
 }
 
 
+// Script: logRequestStats
+const script_8b9d42f29da045339f53d832823d9ecb = async (event, app) => {
+  const AWS = require('aws-sdk');
+  const elasticsearch = require('@elastic/elasticsearch');
+  const createAwsElasticsearchConnector = require('aws-elasticsearch-connector');
+
+  AWS.config.update({
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    region: process.env.AWS_REGION,
+  });
+
+  const client = new elasticsearch.Client({
+    ...createAwsElasticsearchConnector(AWS.config),
+    node: process.env.ELASTICSEARCH_NODE_URL,
+  });
+
+  const indexName =
+    process.env.ELASTICSEARCH_INDEX_NAME + '-' +
+    (new Date()).toLocaleDateString('ja', { year: 'numeric', month: '2-digit' }).replace('/', '-')
+
+  client.index({
+    index: indexName,
+    type: 'doc',
+    body: {
+      name: 'request',
+      timestamp: (new Date()).toISOString(),
+      ip: event.req.headers['x-forwarded-for'] || event.req.connection.remoteAddress,
+      ...(event.params || {}),
+    },
+  });
+}
+
+// Below are the standard Registry log fields (in order) -- awaiting further notes to verify specific contents of each
+//
+// action -- Resolve; ResolveMultiple; Query?
+// dedupe_status -- N/A
+// doi -- EIDR ID for Resolve -- some sort of delimited list for Resolve-Multiple? 
+// dupes -- N/A
+// hash
+// high_score_dupes -- N/A
+// linenum (long)
+// logger
+// loglevel
+// logsrc
+// msg
+// partyid -- From the user's credentials (or the default once we get that set in an environment variable)
+// thread
+// timestamp (date) : DONE -- we're working without a template, but we've converted the date into the correct string format
+// userid -- From the user's credentials (or the default once we get that set in an environment variable)
+// ip : DONE -- NOT part of the Registry log (it seems), so added to the end of the log line
+
+
 // Script: getDefaultType
 const script_ac71ffd8a9e146bdaed7f227e7facc18 = // Get a default resolution type
 //
@@ -1349,35 +1402,6 @@ async () => {
     lower: 'full'
   }
   return defaultType;
-}
-
-// Script: logRequestStats
-const script_8b9d42f29da045339f53d832823d9ecb = async (event, app) => {
-  const AWS = require('aws-sdk');
-  const elasticsearch = require('@elastic/elasticsearch');
-  const createAwsElasticsearchConnector = require('aws-elasticsearch-connector');
-
-  AWS.config.update({
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-    region: process.env.AWS_REGION,
-  });
-
-  const client = new elasticsearch.Client({
-    ...createAwsElasticsearchConnector(AWS.config),
-    node: process.env.ELASTICSEARCH_NODE_URL,
-  });
-
-  client.index({
-    index: process.env.ELASTICSEARCH_INDEX_NAME,
-    type: 'doc',
-    body: {
-      name: 'request',
-      when: (new Date()).toISOString(),
-      ip: event.req.headers['x-forwarded-for'] || event.req.connection.remoteAddress,
-      ...(event.params || {}),
-    },
-  });
 }
 
 // Script: ResolveOneID
@@ -1685,8 +1709,8 @@ app.registerHandler(script_8c9cf40cbc204476963d23d969224a34, '8c9cf40c-bc20-4476
 app.registerHandler(script_110622f3ccda4a8d965656861a1f082e, '110622f3-ccda-4a8d-9656-56861a1f082e', 'tabelize')
 app.registerHandler(script_1fe9472b38044f93acc1361e0ff8f4f4, '1fe9472b-3804-4f93-acc1-361e0ff8f4f4', 'Query')
 app.registerHandler(script_0f3d9ccd2de440d98c827c2b3f5ddd8b, '0f3d9ccd-2de4-40d9-8c82-7c2b3f5ddd8b', 'shallow')
-app.registerHandler(script_ac71ffd8a9e146bdaed7f227e7facc18, 'ac71ffd8-a9e1-46bd-aed7-f227e7facc18', 'getDefaultType')
 app.registerHandler(script_8b9d42f29da045339f53d832823d9ecb, '8b9d42f2-9da0-4533-9f53-d832823d9ecb', 'logRequestStats')
+app.registerHandler(script_ac71ffd8a9e146bdaed7f227e7facc18, 'ac71ffd8-a9e1-46bd-aed7-f227e7facc18', 'getDefaultType')
 app.registerHandler(script_187674a836264ead89ef32dfd1f8c173, '187674a8-3626-4ead-89ef-32dfd1f8c173', 'ResolveOneID')
 app.registerHandler(script_732731b8b1fa4a069e751d8f9576a939, '732731b8-b1fa-4a06-9e75-1d8f9576a939', 'sorter')
 app.registerHandler(script_b80a6646a6df41179c63d113b96572ab, 'b80a6646-a6df-4117-9c63-d113b96572ab', 'ResolveMultipleIDs')
