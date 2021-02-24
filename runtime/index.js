@@ -203,6 +203,26 @@ async ({ req }) => {
   }
 }
 
+// Script: getSysInfo
+const script_edb4ad96d7a2417aa916579ecf0585a1 = async (app) => {
+  const eidr = app.getConnector('eidr');
+  const deps = require(`${__dirname}/../package.json`).dependencies;
+
+  const limits = {
+    idOnly:150000,
+    simple: 50000,
+    other: 1000
+  }
+
+  const versions= {
+    ...eidr.info(),
+    ...deps,
+    scripts: 'unknown',
+  };
+
+  return { limits, versions };
+}
+
 // Script: validateID
 const script_44499d1f9508432486f1f4bfa66f15c9 = // Validate an EIDR content or other ID with the
 // following formats:
@@ -222,26 +242,6 @@ async ({ id }) => {
   const contentRe = /^10\.5240\/([0-9A-F]{4}-){5}[0-9A-Z]$/;
   const otherRe = /^10\.523[79]\/[0-9A-F]{4}-[0-9A-F]{4}$/;
   return contentRe.test(id) || otherRe.test(id);
-}
-
-// Script: getSysInfo
-const script_edb4ad96d7a2417aa916579ecf0585a1 = async (app) => {
-  const eidr = app.getConnector('eidr');
-  const deps = require(`${__dirname}/../package.json`).dependencies;
-
-  const limits = {
-    idOnly:200000,
-    simple: 70000,
-    other: 5000
-  }
-
-  const versions= {
-    ...eidr.info(),
-    ...deps,
-    scripts: 'unknown',
-  };
-
-  return { limits, versions };
 }
 
 // Script: Info
@@ -363,7 +363,8 @@ async (event, app) => {
   let root = req.query.root;
   //console.log(root);
   
-  const DEFAULTPAGESIZE = 2500;
+  const DEFAULTPAGESIZE = 
+      (idOnly || types.type === 'simple') ? 2500 : 1000 ;
   let pageNumber;
   let pageSize;
   let results;
@@ -1694,8 +1695,8 @@ app.getLogger().error('Runtime Http event creation error. Review configuration f
 
 app.registerHandler(script_9c49905643254b15a4f5644fb1abb6d6, '9c499056-4325-4b15-a4f5-644fb1abb6d6', 'checkQueryLimits')
 app.registerHandler(script_d341c1cf401f447388c965f4d896e4fe, 'd341c1cf-401f-4473-88c9-65f4d896e4fe', 'getValidatedTypes')
-app.registerHandler(script_44499d1f9508432486f1f4bfa66f15c9, '44499d1f-9508-4324-86f1-f4bfa66f15c9', 'validateID')
 app.registerHandler(script_edb4ad96d7a2417aa916579ecf0585a1, 'edb4ad96-d7a2-417a-a916-579ecf0585a1', 'getSysInfo')
+app.registerHandler(script_44499d1f9508432486f1f4bfa66f15c9, '44499d1f-9508-4324-86f1-f4bfa66f15c9', 'validateID')
 app.registerHandler(script_c63ded14d69d46f2be3580530e41603c, 'c63ded14-d69d-46f2-be35-80530e41603c', 'Info')
 app.registerHandler(script_2bcfef5c29d34e08a6a37df2ee44d742, '2bcfef5c-29d3-4e08-a6a3-7df2ee44d742', 'tableParse')
 app.registerHandler(script_aaa3721960684a729189ae235c222ca7, 'aaa37219-6068-4a72-9189-ae235c222ca7', 'buildRedirectResponse')
